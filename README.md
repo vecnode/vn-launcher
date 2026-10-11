@@ -1,14 +1,15 @@
 <div align="center">
 
-<img src="assets/logo.png" alt="vn-launcher" width="112">
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="assets/logo-white.png">
+  <img src="assets/logo-black.png" alt="vn-launcher" width="112">
+</picture>
 
 # vn-launcher
 
-**One window for the vecnode applications.** See what is on this machine, what each
-repository has published, and start what you already have.
+**One window for the vecnode applications.** See what is on your machine.
 
-vn-launcher is a native desktop application that keeps track of the vecnode apps on
-your machine and tells you the truth about them.
+vn-launcher is a native desktop application that keeps track of the vecnode/vn apps.
 
 [![License: MIT](https://img.shields.io/badge/license-MIT-3fb950.svg)](LICENSE)
 [![Rust 1.95+](https://img.shields.io/badge/rust-1.95%2B-dea584.svg?logo=rust&logoColor=white)](#requirements)
@@ -16,16 +17,6 @@ your machine and tells you the truth about them.
 [![egui 0.36](https://img.shields.io/badge/UI-egui%200.36-8b5cf6.svg)](https://github.com/emilk/egui)
 [![Platforms](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-4c8dff.svg)](#supported-platforms)
 
-
-</div>
-
----
-
-<div align="center">
-
-<img src="assets/screenshots/library-dark.png" alt="The library, showing four tracked repositories with their releases read from GitHub" width="880">
-
-<sub>The library after a check. Two repositories publish a release; two do not yet.</sub>
 
 </div>
 

@@ -1,8 +1,13 @@
 name: CI
 
 on:
+  # CI runs when a version is cut, not on every push to main. A green tick per commit
+  # is noise when the only thing that publishes is a tag, and it spends minutes of
+  # runner time on changes that are already reviewed.
   push:
-    branches: [main]
+    tags: ['v*']
+  # Pull requests are still checked, so a change is verified before it lands rather
+  # than after. Harmless if you push to main directly.
   pull_request:
   workflow_dispatch:
 
