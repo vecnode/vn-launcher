@@ -48,7 +48,7 @@ const MINIMUM_SIZE: [f32; 2] = [900.0, 600.0];
 /// sidebar uses. An icon has to hold its own against whatever is behind it: a bare
 /// black glyph disappears on a dark taskbar and a bare white one on a light taskbar,
 /// whereas a black tile with a white glyph reads on both.
-const LOGO_RGBA: &[u8] = include_bytes!("../../../assets/logo-64.rgba");
+const LOGO_RGBA: &[u8] = include_bytes!("../../../assets/logo/vn-launcher-app.rgba");
 
 /// The logo is square, and this many pixels on a side.
 const LOGO_SIZE: u32 = 64;
