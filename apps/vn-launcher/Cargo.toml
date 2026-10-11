@@ -1,0 +1,23 @@
+[package]
+name = "vn-launcher"
+description = "Install, update and open the vecnode apps"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+default-run = "vn-launcher"
+publish = false
+
+[lints]
+workspace = true
+
+[dependencies]
+vnl-core = { workspace = true }
+vnl-native = { workspace = true }
+vnl-ui = { workspace = true }
+eframe = { workspace = true, features = ["default_fonts", "wgpu", "accesskit", "wayland", "x11", "persistence", "links"] }
+egui = { workspace = true }
+log = { workspace = true }
+env_logger = { workspace = true }
+serde = { workspace = true }

@@ -1,0 +1,73 @@
+[workspace]
+resolver = "3"
+members = ["crates/*", "apps/*", "xtask"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+# egui 0.36 requires 1.95; this is the real floor, not a guess.
+rust-version = "1.95"
+repository = "https://github.com/vecnode/vn-launcher"
+homepage = "https://github.com/vecnode/vn-launcher"
+authors = ["vecnode"]
+keywords = ["launcher", "egui", "cross-platform", "github-releases"]
+categories = ["gui", "command-line-utilities"]
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+missing_docs = "warn"
+unreachable_pub = "warn"
+
+[workspace.lints.clippy]
+dbg_macro = "deny"
+todo = "deny"
+unimplemented = "deny"
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+manual_let_else = "warn"
+redundant_else = "warn"
+semicolon_if_nothing_returned = "warn"
+
+[workspace.dependencies]
+vnl-core = { path = "crates/core" }
+vnl-native = { path = "crates/native" }
+vnl-ui = { path = "crates/ui" }
+
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.152"
+toml = "1.1.8"
+semver = { version = "1.0.28", features = ["serde"] }
+log = "0.4.34"
+
+egui = "0.36.2"
+eframe = { version = "0.36.2", default-features = false }
+
+# HTTPS through rustls with the operating system's own certificate store
+# (`rustls-platform-verifier`), deliberately without the `rustls-webpki-roots`
+# default: that crate is CDLA-licensed, this one is not.
+ureq = { version = "3.4.2", default-features = false, features = [
+    "rustls-no-provider",
+    "_ring",
+    "gzip",
+    "platform-verifier",
+] }
+
+dirs = "7.0.0"
+env_logger = "0.11.11"
+tempfile = "3.27.0"
+
+# The whole workspace is optimised for a launcher's cold start: a debug build of
+# egui is slow enough to feel broken, so dependencies are optimised even in dev.
+[profile.dev.package."*"]
+opt-level = 2
+
+[profile.dev]
+opt-level = 1
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+panic = "abort"
+strip = "debuginfo"

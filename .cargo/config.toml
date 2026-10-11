@@ -1,0 +1,3 @@
+# `cargo xtask <task>` is the project's task runner; see xtask/src/main.rs.
+[alias]
+xtask = "run --quiet --package xtask --"

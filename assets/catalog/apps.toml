@@ -1,0 +1,149 @@
+# vn-launcher — the catalog this build ships with.
+#
+# Every app the launcher knows about is declared here. Nothing about an app is
+# hard-coded in Rust, so a repository can be added, overridden or corrected by
+# editing a text file. A user copy at the platform config directory (see
+# docs/CATALOG.md) is merged on top of this one, entry by entry, by `id`.
+#
+# Schema version 1. See docs/MANIFEST.md for every field.
+
+version = 1
+
+# ---------------------------------------------------------------------------
+# vncli — a Rust CLI/TUI. The only one of the four that currently publishes a
+# release asset for this platform, and the reference case for the release
+# conventions described in docs/RELEASES.md.
+# ---------------------------------------------------------------------------
+[[app]]
+id       = "vncli"
+name     = "vncli"
+tagline  = "Personal management CLI and TUI for researchers"
+description = """
+The `vn` command: git sync, Docker app management, offline AI chat over Ollama,
+system and network tooling, and an MCP server. Releases ship a relocatable
+prebuilt copy, so no Rust toolchain is needed to run it.
+
+Published for Windows and Linux only. There is no macOS build, and the launcher
+will say so rather than offer you one.
+"""
+repo     = "vecnode/vncli"
+color    = "#3B82F6"
+order    = 1
+
+[app.install]
+# Release assets are named `vncli-<version>-<triple>.<ext>`.
+stems      = ["vncli"]
+extensions = ["zip", "tar.gz"]
+binary     = "vn"
+docs       = "https://github.com/vecnode/vncli#install"
+
+[app.launch]
+windows = ["{bin}"]
+macos   = ["{bin}"]
+linux   = ["{bin}"]
+
+[app.detect]
+command = "vn"
+paths   = ["{install}/vn", "{install}/vn.exe"]
+
+# ---------------------------------------------------------------------------
+# vncode — a DeepSeek Harness plugin pack, not a program you launch.
+#
+# Its own package.json says it "installs into the raw web/CLI profile only".
+# There is deliberately no [app.launch] table: the launcher offers to install or
+# update it, and shows where to read about it, but will not pretend to start it.
+# ---------------------------------------------------------------------------
+[[app]]
+id       = "vncode"
+name     = "vncode"
+tagline  = "Agent IDE plugin pack for DeepSeek Harness"
+description = """
+A personal plugin pack for DeepSeek Harness, published for Windows, macOS and
+Linux. It installs into the raw web/CLI profile rather than running on its own,
+so the launcher treats it as an installable package with no launch action.
+
+Releases carry a SHA256SUMS.txt alongside the archives.
+"""
+repo     = "vecnode/vncode"
+color    = "#8B5CF6"
+order    = 2
+
+[app.install]
+stems      = ["vncode"]
+extensions = ["zip"]
+docs       = "https://github.com/vecnode/vncode#install"
+
+# ---------------------------------------------------------------------------
+# vn-finance — a local-first TypeScript accountant. Publishes no releases yet,
+# so the launcher can only report that fact and link to the repository. The
+# install and launch tables describe what becomes possible once it does publish.
+# ---------------------------------------------------------------------------
+[[app]]
+id       = "vn-finance"
+name     = "vn-finance"
+tagline  = "Local-first personal accountant for Portugal (CIRS category B)"
+description = """
+A private, on-machine accountant for independent work under the Portuguese
+regime. Nothing leaves the machine; the only network call is a rule-pack update.
+
+Runs on Node 22 or newer. The repository publishes no releases yet, so until it
+does the launcher can do nothing but point you at the source.
+"""
+repo     = "vecnode/vn-finance"
+color    = "#16A34A"
+order    = 3
+
+[app.install]
+stems      = ["vn-finance", "vnfin"]
+extensions = ["zip", "tar.gz"]
+binary     = "vnfin"
+docs       = "https://github.com/vecnode/vn-finance#install"
+
+[app.launch]
+windows = ["node", "{app}/src/cli.ts"]
+macos   = ["node", "{app}/src/cli.ts"]
+linux   = ["node", "{app}/src/cli.ts"]
+
+[app.detect]
+command = "vnfin"
+paths   = ["{install}/src/cli.ts"]
+
+# ---------------------------------------------------------------------------
+# vn-mediabus — a C++ media bus. Publishes no releases, and its BUILDING.md
+# documents a toolchain (MSYS2, GLFW, GLEW, OpenGL, Lua 5.1, a vendored libmpv)
+# far too involved for a launcher to guess at, which is exactly why the launcher
+# does not try.
+# ---------------------------------------------------------------------------
+[[app]]
+id       = "vn-mediabus"
+name     = "vn-mediabus"
+tagline  = "Lua-scriptable media bus"
+description = """
+Three C++ applications built from one tree: a player, a Lua-scriptable
+controller and a dashboard that locates the other two beside itself.
+
+No releases are published. Building it needs MSYS2 with a PATH confined to it,
+GLFW, GLEW, OpenGL and Lua 5.1 — see the repository's BUILDING.md. The launcher
+links to that document instead of attempting a build.
+"""
+repo     = "vecnode/vn-mediabus"
+color    = "#F97316"
+order    = 4
+
+[app.install]
+stems      = ["vn-mediabus", "mediabus"]
+extensions = ["zip", "tar.gz"]
+binary     = "media-dashboard-cpp"
+docs       = "https://github.com/vecnode/vn-mediabus/blob/main/BUILDING.md"
+
+[app.launch]
+windows = ["{bin}"]
+macos   = ["{bin}"]
+linux   = ["{bin}"]
+
+[app.detect]
+paths = [
+    "{install}/media-dashboard-cpp",
+    "{install}/media-dashboard-cpp.exe",
+    "{install}/bin/media-dashboard-cpp",
+]

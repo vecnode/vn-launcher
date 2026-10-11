@@ -1,0 +1,7 @@
+[toolchain]
+# The floor is set by egui (see `rust-version` in Cargo.toml); `stable` is fine so
+# long as it is at least that. Pinning an exact version here would mean a
+# contributor's first `cargo build` downloads a toolchain they may already have.
+channel = "stable"
+components = ["rustfmt", "clippy"]
+profile = "minimal"

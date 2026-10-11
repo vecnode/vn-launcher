@@ -1,0 +1,4 @@
+# Functions that are long because they are a sequence of UI statements are not
+# improved by being split; only the genuinely tangled ones are flagged.
+too-many-arguments-threshold = 10
+type-complexity-threshold = 300
