@@ -69,5 +69,9 @@ opt-level = 1
 [profile.release]
 lto = "thin"
 codegen-units = 1
-panic = "abort"
 strip = "debuginfo"
+# `panic = "abort"` is deliberately *not* set. It would shave a little off the binary,
+# but it would also throw away a safety net built on purpose: the feed runs on its own
+# thread, and `Worker::drain` notices when that thread is gone and tells the person,
+# rather than leaving the window saying "Checking…" for ever. Aborting the process on
+# a panic inside a dependency removes that choice.

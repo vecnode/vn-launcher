@@ -26,9 +26,20 @@ impl Color {
     }
 
     /// Parse `#rrggbb` or `#rgb`, with or without the leading `#`.
+    ///
+    /// The ASCII guard is load-bearing, not defensive style. The slices below are
+    /// indexed by **byte**, and `str` indexing panics when an index falls inside a
+    /// multi-byte character: `"€€"` is six bytes long, so it would take the six-digit
+    /// branch and then panic slicing at byte 2, which is inside the first `€`. The
+    /// value comes from a catalog file a person can edit by hand, so that panic was
+    /// reachable by typing. Rejecting non-ASCII first makes every later index a
+    /// boundary by construction.
     #[must_use]
     pub fn parse(value: &str) -> Option<Self> {
         let hex = value.trim().strip_prefix('#').unwrap_or(value.trim());
+        if !hex.is_ascii() {
+            return None;
+        }
         let byte = |s: &str| u8::from_str_radix(s, 16).ok();
         match hex.len() {
             6 => Some(Self::new(byte(&hex[0..2])?, byte(&hex[2..4])?, byte(&hex[4..6])?)),
@@ -123,6 +134,28 @@ mod tests {
     fn refuses_anything_else() {
         for bad in ["", "#", "#12", "#12345", "#gggggg", "rebeccapurple"] {
             assert_eq!(Color::parse(bad), None, "{bad:?}");
+        }
+    }
+
+    #[test]
+    fn multi_byte_input_is_rejected_rather_than_panicking() {
+        // Regression: these are six and three *bytes* long, so they used to take the
+        // six- and three-digit branches and then panic slicing mid-character. The
+        // value can come from a catalog file a person edits by hand.
+        for hostile in [
+            "€€",                       // 6 bytes, 2 chars
+            "€",                        // 3 bytes, 1 char
+            "#€€",                      // with the prefix
+            "日本語",                   // 9 bytes
+            "ffé",                      // 4 bytes
+            "#🎨",                      // 4-byte character
+            "\u{200B}\u{200B}\u{200B}", // zero-width spaces
+        ] {
+            assert_eq!(
+                Color::parse(hostile),
+                None,
+                "{hostile:?} should be refused, not panic"
+            );
         }
     }
 

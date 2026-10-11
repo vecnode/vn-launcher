@@ -17,6 +17,30 @@ pub const MAX_RELEASES: usize = 30;
 /// How much of a release's notes are kept, in characters.
 pub const MAX_NOTES_CHARS: usize = 4_000;
 
+/// The longest a tag may be before its release is treated as unusable.
+///
+/// The response body is read through a 4 MB cap, which bounds the *document* but not
+/// any single string inside it: one field could be the whole 4 MB. A tag is compared,
+/// stored in the cache and laid out on screen, so an unbounded one is a way to make
+/// the interface stop responding. A tag that long is not a tag, so the release is
+/// dropped rather than truncated — a truncated version would be a lie about a version.
+pub const MAX_TAG_CHARS: usize = 128;
+
+/// The longest an attached file's name may be. A name that long identifies nothing, so
+/// the asset is dropped.
+pub const MAX_ASSET_NAME_CHARS: usize = 256;
+
+/// How many attached files are kept from one release. A release may carry hundreds;
+/// the launcher shows one and counts the rest.
+pub const MAX_ASSETS: usize = 128;
+
+/// The longest a URL may be. A URL that long is dropped to empty rather than shown,
+/// because every use of it is either a link or a display.
+pub const MAX_URL_CHARS: usize = 512;
+
+/// The longest a release title may be. Display only, so it is truncated.
+pub const MAX_TITLE_CHARS: usize = 200;
+
 /// One release, as the launcher understands it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Release {
@@ -68,7 +92,7 @@ pub fn parse(json: &str) -> Result<Vec<Release>> {
     let raw: Vec<RawRelease> =
         serde_json::from_value(value).map_err(|e| Error::ReleasePayload(e.to_string()))?;
 
-    Ok(raw.into_iter().take(MAX_RELEASES).map(convert).collect())
+    Ok(raw.into_iter().take(MAX_RELEASES).filter_map(convert).collect())
 }
 
 /// The newest release that should be offered, or `None` when there is none.
@@ -109,22 +133,42 @@ pub fn notes_excerpt(release: &Release) -> Option<&str> {
         .filter(|text| !text.is_empty())
 }
 
-fn convert(raw: RawRelease) -> Release {
-    Release {
+/// Turn one payload entry into a release, or discard it.
+///
+/// Returns `None` for a release that cannot be described honestly — an over-long tag
+/// is the only such case — so the rest of the response is still usable.
+fn convert(raw: RawRelease) -> Option<Release> {
+    // Silent by design: the core has no logger, and a release this malformed is not
+    // something the interface can act on. The count of releases simply comes back one
+    // shorter, which is honest — the launcher is not claiming a version it cannot name.
+    if raw.tag_name.chars().count() > MAX_TAG_CHARS {
+        return None;
+    }
+
+    Some(Release {
         tag: Tag::parse(&raw.tag_name),
-        name: raw.name.filter(|name| !name.trim().is_empty()),
+        name: raw
+            .name
+            .filter(|name| !name.trim().is_empty())
+            .map(|name| truncate(name, MAX_TITLE_CHARS)),
         notes: raw
             .body
             .map(|body| truncate(body, MAX_NOTES_CHARS))
             .filter(|body| !body.trim().is_empty()),
         draft: raw.draft,
         prerelease: raw.prerelease,
-        published_at: raw.published_at,
-        html_url: raw.html_url.unwrap_or_default(),
+        published_at: raw
+            .published_at
+            .filter(|value| value.chars().count() <= MAX_URL_CHARS),
+        html_url: raw
+            .html_url
+            .filter(|url| url.chars().count() <= MAX_URL_CHARS)
+            .unwrap_or_default(),
         assets: raw
             .assets
             .into_iter()
-            .filter(|asset| !asset.name.is_empty())
+            .filter(|asset| !asset.name.is_empty() && asset.name.chars().count() <= MAX_ASSET_NAME_CHARS)
+            .take(MAX_ASSETS)
             .map(|asset| Asset {
                 name: asset.name,
                 size: asset.size,
@@ -132,7 +176,7 @@ fn convert(raw: RawRelease) -> Release {
                 digest: asset.digest,
             })
             .collect(),
-    }
+    })
 }
 
 /// Cut a string to `max` characters without splitting one.
@@ -287,5 +331,53 @@ mod tests {
                 .join(",")
         );
         assert_eq!(parse(&json).unwrap().len(), MAX_RELEASES);
+    }
+
+    #[test]
+    fn an_absurd_tag_drops_its_release_rather_than_freezing_the_interface() {
+        // The body is read through a 4 MB cap, which bounds the document but not any
+        // single string inside it. A tag this long would be compared, cached and laid
+        // out on screen.
+        let huge = format!("v{}", "9".repeat(MAX_TAG_CHARS * 40));
+        let json = format!(r#"[{{"tag_name":"{huge}"}},{{"tag_name":"v1.0.0"}}]"#);
+        let releases = parse(&json).unwrap();
+        assert_eq!(releases.len(), 1, "only the usable release survives");
+        assert_eq!(releases[0].tag.raw(), "v1.0.0");
+    }
+
+    #[test]
+    fn absurd_asset_names_and_urls_are_bounded() {
+        let huge_name = "a".repeat(MAX_ASSET_NAME_CHARS + 1);
+        let huge_url = "h".repeat(MAX_URL_CHARS + 1);
+        let json = format!(
+            r#"[{{"tag_name":"v1.0.0","html_url":"{huge_url}","assets":[
+                {{"name":"{huge_name}"}},{{"name":"good.zip"}}]}}]"#
+        );
+        let releases = parse(&json).unwrap();
+        assert_eq!(releases[0].html_url, "", "an unusable URL is emptied");
+        assert_eq!(releases[0].assets.len(), 1, "the unusable name is dropped");
+        assert_eq!(releases[0].assets[0].name, "good.zip");
+    }
+
+    #[test]
+    fn the_number_of_assets_is_capped() {
+        let json = format!(
+            r#"[{{"tag_name":"v1.0.0","assets":[{}]}}]"#,
+            (0..MAX_ASSETS + 30)
+                .map(|i| format!(r#"{{"name":"asset-{i}.zip"}}"#))
+                .collect::<Vec<_>>()
+                .join(",")
+        );
+        assert_eq!(parse(&json).unwrap()[0].assets.len(), MAX_ASSETS);
+    }
+
+    #[test]
+    fn a_release_title_is_truncated_not_dropped() {
+        let huge = "t".repeat(MAX_TITLE_CHARS + 50);
+        let json = format!(r#"[{{"tag_name":"v1.0.0","name":"{huge}"}}]"#);
+        let releases = parse(&json).unwrap();
+        let title = releases[0].name.as_deref().unwrap();
+        assert_eq!(title.chars().count(), MAX_TITLE_CHARS + 1);
+        assert!(title.ends_with('…'));
     }
 }

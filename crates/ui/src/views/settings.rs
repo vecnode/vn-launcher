@@ -4,12 +4,15 @@
 //! and no sign-in, because the launcher only ever reads public repositories as an
 //! anonymous guest, and `docs/RELEASES.md` explains why installing is not offered
 //! yet.
+//!
+//! There is also no update *schedule*. The launcher never asks about its own
+//! releases in the background; there is one button, and it is pressed on purpose.
 
 use egui::{CornerRadius, RichText, Sense, Stroke, StrokeKind, pos2, vec2};
 
 use crate::app::Ui as State;
 use crate::icons::Icon;
-use crate::model::{Action, World};
+use crate::model::{Action, LauncherUpdate, Tone, World};
 use crate::theme::{RADIUS_MD, SPACE_LG, SPACE_MD, SPACE_SM, SPACE_XL, Theme, ThemeChoice};
 use crate::views;
 use crate::widgets::{self, ButtonKind};
@@ -25,11 +28,11 @@ pub fn show(ui: &mut egui::Ui, theme: &Theme, world: &World, state: &mut State, 
 
     appearance(ui, theme, state, actions);
     ui.add_space(SPACE_XL);
-    checking(ui, theme, world, state, actions);
+    releases(ui, theme, world, state, actions);
     ui.add_space(SPACE_XL);
     storage(ui, theme, world, actions);
     ui.add_space(SPACE_XL);
-    about(ui, theme, world);
+    about(ui, theme, world, actions);
 }
 
 /// Theme choice.
@@ -55,38 +58,19 @@ fn appearance(ui: &mut egui::Ui, theme: &Theme, state: &mut State, actions: &mut
     });
 }
 
-/// When updates are looked for.
-fn checking(ui: &mut egui::Ui, theme: &Theme, world: &World, state: &mut State, actions: &mut Vec<Action>) {
+/// What is read, and how it is cached.
+fn releases(ui: &mut egui::Ui, theme: &Theme, world: &World, state: &mut State, actions: &mut Vec<Action>) {
     widgets::card(ui, theme, |ui| {
         widgets::section(
             ui,
             theme,
-            "Checking for updates",
+            "Releases",
             Some(
-                "Each app's releases are read at most once per interval. The reading is cached, \
-                 so a launcher left open does not keep asking.",
+                "Nothing is read on a schedule. A repository is asked when you press \
+                 Check for updates, and the answer is kept so that asking twice in a row \
+                 does not spend a second request.",
             ),
         );
-
-        ui.horizontal(|ui| {
-            for hours in [1_u32, 6, 12, 24, 168] {
-                let selected = state.interval_hours == hours;
-                let label = if hours >= 168 {
-                    "Weekly".to_owned()
-                } else if hours == 24 {
-                    "Daily".to_owned()
-                } else {
-                    format!("{hours} h")
-                };
-                if segmented(ui, theme, selected, &label) {
-                    state.interval_hours = hours;
-                    actions.push(Action::SetIntervalHours(hours));
-                }
-                ui.add_space(SPACE_SM);
-            }
-        });
-
-        ui.add_space(SPACE_LG);
 
         let mut prerelease = state.prerelease;
         if ui
@@ -181,19 +165,65 @@ fn storage(ui: &mut egui::Ui, theme: &Theme, world: &World, actions: &mut Vec<Ac
     });
 }
 
-/// Version, machine and licence.
-fn about(ui: &mut egui::Ui, theme: &Theme, world: &World) {
+/// The launcher's own version, and the one button that asks about a newer one.
+fn about(ui: &mut egui::Ui, theme: &Theme, world: &World, actions: &mut Vec<Action>) {
     widgets::card(ui, theme, |ui| {
-        widgets::section(ui, theme, "About", None);
+        widgets::section(ui, theme, "vn-launcher", None);
 
-        widgets::field(
-            ui,
-            theme,
-            "Version",
-            &format!("vn-launcher {}", vnl_core::VERSION),
-            true,
-        );
+        ui.horizontal(|ui| {
+            ui.vertical(|ui| {
+                widgets::overline(ui, theme, "Version");
+                ui.add_space(2.0);
+                ui.label(
+                    RichText::new(vnl_core::VERSION)
+                        .font(theme.text.mono.clone())
+                        .color(theme.palette.text_primary),
+                );
+            });
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                let checking = world.update.is_checking();
+                let response = widgets::button(
+                    ui,
+                    theme,
+                    ButtonKind::Primary,
+                    Some(Icon::Download),
+                    "Update",
+                    !checking && !world.offline,
+                );
+                if response.clicked() {
+                    actions.push(Action::CheckLauncherUpdate);
+                }
+                if world.offline {
+                    response.on_hover_text("Offline mode is on, so GitHub will not be asked");
+                } else if checking {
+                    response.on_hover_text("Already asking GitHub");
+                } else {
+                    response.on_hover_text("Ask whether a newer release of vn-launcher exists");
+                }
+            });
+        });
+
         ui.add_space(SPACE_MD);
+        let (icon, tone, message) = describe_update(&world.update);
+        widgets::icon_label(ui, theme, icon, &message, tone);
+
+        if let LauncherUpdate::Available { url, .. } = &world.update
+            && widgets::button(
+                ui,
+                theme,
+                ButtonKind::Secondary,
+                Some(Icon::External),
+                "Open the release page",
+                true,
+            )
+            .clicked()
+        {
+            actions.push(Action::OpenUrl(url.clone()));
+        }
+
+        ui.add_space(SPACE_LG);
+        widgets::separator(ui, theme);
+
         widgets::field(
             ui,
             theme,
@@ -220,8 +250,7 @@ fn about(ui: &mut egui::Ui, theme: &Theme, world: &World) {
         ui.label(
             RichText::new(
                 "An account, a token, a sign-in, or a payment. Every request goes to GitHub's \
-                 public API as an anonymous guest, which is also why feeds are cached and read \
-                 no more often than the interval above.",
+                 public API as an anonymous guest.",
             )
             .font(theme.text.small.clone())
             .color(theme.palette.text_secondary),
@@ -232,13 +261,43 @@ fn about(ui: &mut egui::Ui, theme: &Theme, world: &World) {
         ui.add_space(SPACE_SM);
         ui.label(
             RichText::new(
-                "Downloading, installing, updating and removing. Those four arrive together once \
-                 every repository publishes releases the same way — see docs/RELEASES.md.",
+                "Downloading, installing, updating and removing apps. Those four arrive together \
+                 once every repository publishes releases the same way — see docs/RELEASES.md.",
             )
             .font(theme.text.small.clone())
             .color(theme.palette.text_secondary),
         );
     });
+}
+
+/// How the launcher's own update check should read.
+fn describe_update(update: &LauncherUpdate) -> (Icon, Tone, String) {
+    match update {
+        LauncherUpdate::Unknown => (
+            Icon::Info,
+            Tone::Neutral,
+            "Press Update to ask whether a newer release exists.".to_owned(),
+        ),
+        LauncherUpdate::Checking => (Icon::Refresh, Tone::Info, "Asking GitHub…".to_owned()),
+        LauncherUpdate::UpToDate => (
+            Icon::Check,
+            Tone::Success,
+            format!("{} is the newest release.", vnl_core::VERSION),
+        ),
+        LauncherUpdate::Available { version, .. } => (
+            Icon::Download,
+            Tone::Accent,
+            format!("vn-launcher {version} has been released."),
+        ),
+        LauncherUpdate::NoReleases => (
+            Icon::Info,
+            Tone::Neutral,
+            "This repository publishes no releases yet, so there is nothing to compare \
+             against."
+                .to_owned(),
+        ),
+        LauncherUpdate::Failed(reason) => (Icon::Alert, Tone::Danger, format!("Could not check: {reason}")),
+    }
 }
 
 /// One option in a segmented control.

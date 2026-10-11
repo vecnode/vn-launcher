@@ -30,8 +30,6 @@ pub struct Ui {
     pub selected: Option<String>,
     /// The theme the person chose.
     pub theme_choice: ThemeChoice,
-    /// How often updates are looked for, in hours.
-    pub interval_hours: u32,
     /// Whether pre-releases are offered.
     pub prerelease: bool,
     /// What has been typed into the add-repository field.
@@ -49,13 +47,12 @@ pub struct Ui {
 impl Ui {
     /// A fresh interface.
     #[must_use]
-    pub fn new(theme_choice: ThemeChoice, interval_hours: u32, prerelease: bool) -> Self {
+    pub fn new(theme_choice: ThemeChoice, prerelease: bool) -> Self {
         Self {
             tab: Tab::Library,
             search: String::new(),
             selected: None,
             theme_choice,
-            interval_hours,
             prerelease,
             add_input: String::new(),
             probe: None,

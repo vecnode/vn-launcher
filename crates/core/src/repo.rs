@@ -59,8 +59,8 @@ impl Repo {
         let name = segments.next().ok_or_else(|| Error::BadRepo(input.to_owned()))?;
         let name = name.strip_suffix(".git").unwrap_or(name);
 
-        let owner = validate("owner", owner)?;
-        let name = validate("repository", name)?;
+        let owner = validate(NameKind::Owner, owner)?;
+        let name = validate(NameKind::Repository, name)?;
         Ok(Self {
             owner: owner.to_owned(),
             name: name.to_owned(),
@@ -123,20 +123,60 @@ impl fmt::Display for Repo {
     }
 }
 
-/// Check a single GitHub name.
-fn validate<'a>(part: &'static str, value: &'a str) -> Result<&'a str> {
+/// Which of the two names in `owner/name` is being checked.
+///
+/// GitHub's rules differ between the two, and the difference is load-bearing here
+/// rather than pedantic — see [`validate`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum NameKind {
+    /// The user or organisation.
+    Owner,
+    /// The repository.
+    Repository,
+}
+
+impl NameKind {
+    /// How it is named in an error.
+    fn label(self) -> &'static str {
+        match self {
+            Self::Owner => "owner",
+            Self::Repository => "repository",
+        }
+    }
+}
+
+/// Check a single GitHub name against GitHub's own rules.
+///
+/// An owner is letters, digits and hyphens — **no dots**. That is GitHub's rule, and
+/// enforcing it is also what closes a spoofing hole: without it,
+/// `https://github.com.evil.com/owner` parses as a repository owned by
+/// `github.com.evil.com`, which the add-repository flow would then display as
+/// something that reads like GitHub and is not. The request would go to the real
+/// `api.github.com` and 404, so nothing dangerous happens — but a launcher should not
+/// show a person a repository name that is really a hostname.
+///
+/// A repository name may additionally contain dots and underscores, which is why
+/// `vecnode/vecnode.github.io` remains valid.
+fn validate(kind: NameKind, value: &str) -> Result<&str> {
     let legal = !value.is_empty()
         && value.len() <= MAX_NAME
         && value != "."
         && value != ".."
-        && value
-            .chars()
-            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'));
+        && match kind {
+            NameKind::Owner => {
+                !value.starts_with('-')
+                    && !value.ends_with('-')
+                    && value.chars().all(|c| c.is_ascii_alphanumeric() || c == '-')
+            }
+            NameKind::Repository => value
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.')),
+        };
     if legal {
         Ok(value)
     } else {
         Err(Error::BadRepoPart {
-            part,
+            part: kind.label(),
             value: value.to_owned(),
         })
     }
@@ -206,5 +246,38 @@ mod tests {
     fn very_long_names_are_refused() {
         let long = "a".repeat(MAX_NAME + 1);
         assert!(Repo::parse(&format!("owner/{long}")).is_err());
+    }
+
+    #[test]
+    fn a_hostname_is_never_read_as_an_owner() {
+        // GitHub forbids dots in an owner name. Without that rule these parse as a
+        // repository owned by `github.com.evil.com`, which the add-repository flow
+        // would display as something that reads like GitHub and is not.
+        for spoof in [
+            "https://github.com.evil.com/owner/name",
+            "github.com.evil.com/owner/name",
+            "my.org/repo",
+            "example.com",
+        ] {
+            assert!(Repo::parse(spoof).is_err(), "should refuse {spoof:?}");
+        }
+    }
+
+    #[test]
+    fn an_owner_may_not_begin_or_end_with_a_hyphen() {
+        assert!(Repo::parse("-leading/repo").is_err());
+        assert!(Repo::parse("trailing-/repo").is_err());
+        // A hyphen inside is fine, as it is for any real owner.
+        assert!(Repo::parse("vec-node/repo").is_ok());
+    }
+
+    #[test]
+    fn a_repository_name_may_still_contain_dots_and_underscores() {
+        // The owner rule must not be applied to the repository name.
+        assert_eq!(
+            Repo::parse("vecnode/vecnode.github.io").unwrap().slug(),
+            "vecnode/vecnode.github.io"
+        );
+        assert!(Repo::parse("owner/my_tool.rs").is_ok());
     }
 }

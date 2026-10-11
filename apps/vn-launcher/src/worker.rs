@@ -8,15 +8,14 @@
 
 use std::sync::mpsc::{Receiver, Sender, TryRecvError, channel};
 use std::thread;
-use std::time::Duration;
 
 use vnl_core::catalog::{AppEntry, AppKind};
 use vnl_core::status::Availability;
-use vnl_core::{Repo, Target};
+use vnl_core::{Repo, Tag, Target};
 use vnl_native::cache::DEFAULT_TTL;
 use vnl_native::http::{Client, MAX_PROBE_BYTES};
 use vnl_native::{Detection, Feed, FeedCache, Paths};
-use vnl_ui::ProbeReport;
+use vnl_ui::{LauncherUpdate, ProbeReport};
 
 /// What the shell asks the worker to do.
 ///
@@ -34,8 +33,11 @@ pub enum Request {
     SetPrerelease(bool),
     /// Stop contacting GitHub.
     SetOffline(bool),
-    /// Change how long a cached feed stays fresh.
-    SetIntervalHours(u32),
+    /// Ask whether the launcher itself has a newer release.
+    ///
+    /// The only way that question is ever asked: there is no schedule and no
+    /// background check.
+    CheckLauncherUpdate,
     /// Forget every cached response.
     ClearCache,
 }
@@ -56,6 +58,8 @@ pub enum Response {
     },
     /// What the add-repository flow learned.
     Probe(Box<ProbeReport>),
+    /// What the launcher's own repository offers.
+    LauncherUpdate(Box<LauncherUpdate>),
     /// The cache was emptied.
     CacheCleared {
         /// The cache's state afterwards.
@@ -178,9 +182,12 @@ fn run(
             }
             Request::SetPrerelease(value) => feed.set_allow_prerelease(value),
             Request::SetOffline(value) => feed.set_offline(value),
-            Request::SetIntervalHours(hours) => {
-                feed.cache_mut()
-                    .set_ttl(Duration::from_secs(u64::from(hours) * 3_600));
+            Request::CheckLauncherUpdate => {
+                let update = launcher_update(&mut feed, target);
+                let _ = responses.send(Response::LauncherUpdate(Box::new(update)));
+                let _ = responses.send(Response::Finished {
+                    cached: feed.cache().len(),
+                });
             }
             Request::ClearCache => {
                 if let Err(error) = feed.cache_mut().clear() {
@@ -316,6 +323,52 @@ fn probe(feed: &mut Feed, client: &Client, text: &str, target: Target) -> ProbeR
     }
 }
 
+/// Ask the launcher's own repository whether a newer release exists.
+///
+/// Run through the same feed as every other app, deliberately: a second code path for
+/// "check myself" would be a second place for the answer to be wrong.
+fn launcher_update(feed: &mut Feed, target: Target) -> LauncherUpdate {
+    let repo = match Repo::parse(vnl_core::LAUNCHER_REPO) {
+        Ok(repo) => repo,
+        Err(error) => return LauncherUpdate::Failed(error.to_string()),
+    };
+
+    // The stems only matter for choosing an asset, which an update check does not do.
+    let probe = feed.probe(&repo, &target, &["vn-launcher".to_owned()], &[]);
+    decide_launcher_update(&probe.availability, vnl_core::VERSION)
+}
+
+/// Turn what the launcher's own repository offers into an answer for this build.
+///
+/// Pure, and separate from the request that produced it, so the interesting cases —
+/// no releases yet, a tag that is not a version, being current — can be tested without
+/// a network or an interface.
+fn decide_launcher_update(availability: &Availability, running: &str) -> LauncherUpdate {
+    let Availability::Release(info) = availability else {
+        return match availability {
+            Availability::Failed(reason) => LauncherUpdate::Failed(reason.clone()),
+            // Not asked yet, still being asked, or nothing published. None of these is
+            // an error, and only one of them is worth a sentence of its own.
+            Availability::Unknown | Availability::Checking => LauncherUpdate::Unknown,
+            Availability::NoReleases | Availability::Release(_) => LauncherUpdate::NoReleases,
+        };
+    };
+
+    match vnl_core::version::is_newer(&Tag::parse(&info.tag), &Tag::parse(running)) {
+        Some(true) => LauncherUpdate::Available {
+            version: info.version.clone(),
+            url: info.html_url.clone(),
+        },
+        Some(false) => LauncherUpdate::UpToDate,
+        // A tag that is not a version cannot be compared, and guessing would be worse
+        // than saying so.
+        None => LauncherUpdate::Failed(format!(
+            "the newest release is tagged `{}`, which cannot be compared with {running}",
+            info.tag
+        )),
+    }
+}
+
 /// Seconds since the Unix epoch.
 #[must_use]
 pub fn now_unix() -> i64 {
@@ -323,4 +376,89 @@ pub fn now_unix() -> i64 {
         .duration_since(std::time::UNIX_EPOCH)
         .map(|elapsed| elapsed.as_secs() as i64)
         .unwrap_or(0)
+}
+
+#[cfg(test)]
+mod tests {
+    #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+
+    use super::*;
+    use vnl_core::status::ReleaseInfo;
+    use vnl_core::{Asset, AssetChoice};
+
+    fn release(tag: &str, version: &str) -> Availability {
+        Availability::Release(Box::new(ReleaseInfo {
+            tag: tag.to_owned(),
+            version: version.to_owned(),
+            name: None,
+            prerelease: false,
+            published_at: None,
+            html_url: format!("https://github.com/vecnode/vn-launcher/releases/tag/{tag}"),
+            notes: None,
+            asset: AssetChoice::Chosen(Asset {
+                name: format!("vn-launcher-{version}-windows-x86_64.zip"),
+                size: 1,
+                download_url: String::new(),
+                digest: None,
+            }),
+            asset_count: 1,
+        }))
+    }
+
+    #[test]
+    fn being_current_is_reported_as_current() {
+        assert_eq!(
+            decide_launcher_update(&release("v0.1.0", "0.1.0"), "0.1.0"),
+            LauncherUpdate::UpToDate
+        );
+        // An older release than the running build is also "nothing to do".
+        assert_eq!(
+            decide_launcher_update(&release("v0.0.9", "0.0.9"), "0.1.0"),
+            LauncherUpdate::UpToDate
+        );
+    }
+
+    #[test]
+    fn a_newer_release_is_offered_with_its_page() {
+        match decide_launcher_update(&release("v0.2.0", "0.2.0"), "0.1.0") {
+            LauncherUpdate::Available { version, url } => {
+                assert_eq!(version, "0.2.0");
+                assert!(url.contains("v0.2.0"));
+            }
+            other => panic!("expected Available, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn a_repository_with_nothing_published_is_not_an_error() {
+        // The real state of `vecnode/vn-launcher` today, and the answer a person
+        // pressing Update will actually see.
+        assert_eq!(
+            decide_launcher_update(&Availability::NoReleases, "0.1.0"),
+            LauncherUpdate::NoReleases
+        );
+        assert_eq!(
+            decide_launcher_update(&Availability::Unknown, "0.1.0"),
+            LauncherUpdate::Unknown
+        );
+    }
+
+    #[test]
+    fn an_unreadable_feed_is_reported_rather_than_hidden() {
+        assert_eq!(
+            decide_launcher_update(&Availability::Failed("offline".to_owned()), "0.1.0"),
+            LauncherUpdate::Failed("offline".to_owned())
+        );
+    }
+
+    #[test]
+    fn a_tag_that_is_not_a_version_is_never_guessed_at() {
+        match decide_launcher_update(&release("nightly", "nightly"), "0.1.0") {
+            LauncherUpdate::Failed(reason) => {
+                assert!(reason.contains("nightly"), "{reason}");
+                assert!(reason.contains("0.1.0"), "{reason}");
+            }
+            other => panic!("expected Failed, got {other:?}"),
+        }
+    }
 }

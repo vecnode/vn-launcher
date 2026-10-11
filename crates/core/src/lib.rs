@@ -51,3 +51,9 @@ pub use version::Tag;
 
 /// The version of vn-launcher itself, from `Cargo.toml`.
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
+
+/// The launcher's own repository.
+///
+/// Named here so the launcher can look itself up with exactly the machinery it uses
+/// for every other app, rather than through a second code path that would drift.
+pub const LAUNCHER_REPO: &str = "vecnode/vn-launcher";

@@ -38,6 +38,16 @@ const STARTING_SIZE: [f32; 2] = [1180.0, 780.0];
 /// The smallest the window may be made before the layout stops reflowing.
 const MINIMUM_SIZE: [f32; 2] = [900.0, 600.0];
 
+/// The application's own mark, as unmultiplied RGBA.
+///
+/// Embedded as raw pixels rather than as a PNG so that putting an icon on the window
+/// and the taskbar costs no image decoder — `egui::IconData` takes exactly these three
+/// fields, and the file is generated from the same geometry `ui/src/icons.rs` draws.
+const LOGO_RGBA: &[u8] = include_bytes!("../../../assets/logo-64.rgba");
+
+/// The logo is square, and this many pixels on a side.
+const LOGO_SIZE: u32 = 64;
+
 fn main() -> eframe::Result<()> {
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
 
@@ -46,7 +56,12 @@ fn main() -> eframe::Result<()> {
             .with_title("vn-launcher")
             .with_app_id("vn-launcher")
             .with_inner_size(STARTING_SIZE)
-            .with_min_inner_size(MINIMUM_SIZE),
+            .with_min_inner_size(MINIMUM_SIZE)
+            .with_icon(egui::IconData {
+                rgba: LOGO_RGBA.to_vec(),
+                width: LOGO_SIZE,
+                height: LOGO_SIZE,
+            }),
         ..Default::default()
     };
 

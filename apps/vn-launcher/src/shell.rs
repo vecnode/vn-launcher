@@ -11,7 +11,7 @@ use vnl_core::catalog::{AppEntry, Catalog};
 use vnl_core::status::{self, AppStatus, Availability, InstallState};
 use vnl_core::{Os, Repo, Target};
 use vnl_native::{Paths, launch, user_catalog};
-use vnl_ui::{Action, AppCard, Notice, Tab, Tone, World};
+use vnl_ui::{Action, AppCard, LauncherUpdate, Notice, Tab, Tone, World};
 
 use crate::settings::Settings;
 use crate::worker::{Request, Response, Worker, now_unix};
@@ -76,11 +76,10 @@ impl Shell {
         };
         worker.send(Request::SetPrerelease(settings.prerelease));
         worker.send(Request::SetOffline(settings.offline));
-        worker.send(Request::SetIntervalHours(settings.interval_hours));
         worker.send(Request::Check(checkable_entries(&catalog)));
         world.busy = true;
 
-        let ui = vnl_ui::Ui::new(settings.theme, settings.interval_hours, settings.prerelease);
+        let ui = vnl_ui::Ui::new(settings.theme, settings.prerelease);
 
         Self {
             ui,
@@ -109,6 +108,9 @@ impl Shell {
                 Response::Probe(report) => {
                     self.ui.probing = false;
                     self.ui.probe = Some(*report);
+                }
+                Response::LauncherUpdate(update) => {
+                    self.world.update = *update;
                 }
                 Response::CacheCleared { remaining } => {
                     self.world.cache_entries = remaining;
@@ -192,16 +194,15 @@ impl Shell {
                 self.ui.theme_choice = choice;
                 self.settings.theme = choice;
             }
-            Action::SetIntervalHours(hours) => {
-                self.ui.interval_hours = hours;
-                self.settings.interval_hours = hours;
-                self.worker.send(Request::SetIntervalHours(hours));
-            }
             Action::SetPrerelease(value) => {
                 self.ui.prerelease = value;
                 self.settings.prerelease = value;
                 self.worker.send(Request::SetPrerelease(value));
                 self.check_all();
+            }
+            Action::CheckLauncherUpdate => {
+                self.world.update = LauncherUpdate::Checking;
+                self.worker.send(Request::CheckLauncherUpdate);
             }
             Action::SetOffline(value) => {
                 self.world.offline = value;
@@ -392,7 +393,6 @@ impl Shell {
     /// Keep the settings file in step with what the interface chose.
     fn sync_settings(&mut self) {
         self.settings.theme = self.ui.theme_choice;
-        self.settings.interval_hours = self.ui.interval_hours;
         self.settings.prerelease = self.ui.prerelease;
     }
 }
@@ -481,6 +481,7 @@ fn build_world(catalog: &Catalog, paths: &Paths, target: Target, settings: &Sett
         install_root: paths.install_root().display().to_string(),
         user_catalog: paths.user_catalog().display().to_string(),
         user_catalog_exists: paths.user_catalog().exists(),
+        update: LauncherUpdate::Unknown,
     }
 }
 

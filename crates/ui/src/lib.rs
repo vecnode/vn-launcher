@@ -35,14 +35,12 @@ pub mod views;
 pub mod widgets;
 
 pub use app::Ui;
-pub use model::{Action, AppCard, Notice, ProbeReport, Tab, Tone, World};
+pub use model::{Action, AppCard, LauncherUpdate, Notice, ProbeReport, Tab, Tone, World};
 pub use theme::{Theme, ThemeChoice};
+pub use vnl_core::LAUNCHER_REPO;
 
 /// Where the release convention every repository must follow is written down.
 ///
 /// The interface links to it wherever it has to explain why installing is not
 /// offered yet, so the explanation is never a dead end.
 pub const RELEASE_CONVENTION_URL: &str = "https://github.com/vecnode/vn-launcher/blob/main/docs/RELEASES.md";
-
-/// The launcher's own repository, opened from the About panel.
-pub const LAUNCHER_REPO: &str = "vecnode/vn-launcher";

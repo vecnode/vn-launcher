@@ -140,6 +140,41 @@ pub struct ProbeReport {
     pub matched_asset: Option<String>,
 }
 
+/// What the launcher knows about its own newer releases.
+///
+/// Nothing here happens on a schedule. The launcher never checks for its own updates
+/// in the background; a person presses **Update** and this is the answer.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub enum LauncherUpdate {
+    /// Not asked yet.
+    #[default]
+    Unknown,
+    /// An answer is on its way.
+    Checking,
+    /// This build is the newest release.
+    UpToDate,
+    /// A newer release exists.
+    Available {
+        /// The version on offer.
+        version: String,
+        /// Its release page.
+        url: String,
+    },
+    /// The launcher's own repository publishes no releases yet, so there is nothing
+    /// to compare against.
+    NoReleases,
+    /// The question could not be answered.
+    Failed(String),
+}
+
+impl LauncherUpdate {
+    /// Whether a check is in flight.
+    #[must_use]
+    pub fn is_checking(&self) -> bool {
+        matches!(self, Self::Checking)
+    }
+}
+
 /// Everything the interface draws.
 #[derive(Debug, Clone, Default)]
 pub struct World {
@@ -163,6 +198,8 @@ pub struct World {
     pub user_catalog: String,
     /// Whether the user catalog exists yet.
     pub user_catalog_exists: bool,
+    /// What is known about the launcher's own newer releases.
+    pub update: LauncherUpdate,
 }
 
 impl World {
@@ -242,10 +279,13 @@ pub enum Action {
     SetSearch(String),
     /// Change the theme.
     SetTheme(ThemeChoice),
-    /// Change how often updates are looked for.
-    SetIntervalHours(u32),
     /// Include or exclude pre-releases.
     SetPrerelease(bool),
+    /// Ask whether the launcher itself has a newer release.
+    ///
+    /// Deliberately the only way that question is ever asked: there is no schedule
+    /// and no automatic check.
+    CheckLauncherUpdate,
     /// Turn network reads off or on.
     SetOffline(bool),
     /// Forget every cached feed.

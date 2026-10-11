@@ -104,6 +104,12 @@ pub fn detect(spec: &DetectSpec, app_dir: &Path) -> Detection {
 ///
 /// This walks `PATH` itself rather than running `which` or `where`, so it cannot
 /// hang on a slow subprocess and needs no shell.
+///
+/// Only **absolute** entries are searched. A relative entry — and an empty one, which
+/// every platform reads as "the current directory" — would make the launcher report an
+/// app as present because a file of that name happened to sit in whatever directory
+/// the launcher was started from, and then offer to launch it. That is the classic
+/// untrusted-search-path mistake, and it costs one comparison to avoid.
 #[must_use]
 pub fn find_on_path(command: &str) -> Option<PathBuf> {
     if command.trim().is_empty() {
@@ -111,7 +117,7 @@ pub fn find_on_path(command: &str) -> Option<PathBuf> {
     }
     let path = std::env::var_os("PATH")?;
     for directory in std::env::split_paths(&path) {
-        if directory.as_os_str().is_empty() {
+        if directory.as_os_str().is_empty() || !directory.is_absolute() {
             continue;
         }
         for candidate in candidates(&directory, command) {
