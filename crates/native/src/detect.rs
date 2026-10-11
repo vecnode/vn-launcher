@@ -130,10 +130,17 @@ pub fn find_on_path(command: &str) -> Option<PathBuf> {
 }
 
 /// The file names to try inside one `PATH` directory.
+///
+/// Split by target rather than conditionally mutating one vector. An `#[cfg]` on an
+/// `if` statement compiles the mutation away on every other platform, which leaves
+/// the binding unused there — and CI denies warnings, so that is not a style nit but
+/// a build failure on Linux and macOS that a Windows machine cannot reproduce. Two
+/// self-contained bodies make what compiles on a platform the whole of what is there.
+#[cfg(windows)]
 fn candidates(directory: &Path, command: &str) -> Vec<PathBuf> {
     let mut out = vec![directory.join(command)];
 
-    #[cfg(windows)]
+    // `PATHEXT` is how Windows decides that `vn` may mean `vn.exe`.
     if Path::new(command).extension().is_none() {
         let extensions = std::env::var("PATHEXT").unwrap_or_else(|_| ".COM;.EXE;.BAT;.CMD".to_owned());
         for extension in extensions.split(';').filter(|e| !e.trim().is_empty()) {
@@ -142,6 +149,12 @@ fn candidates(directory: &Path, command: &str) -> Vec<PathBuf> {
     }
 
     out
+}
+
+/// Everywhere else a command is exactly its own name.
+#[cfg(not(windows))]
+fn candidates(directory: &Path, command: &str) -> Vec<PathBuf> {
+    vec![directory.join(command)]
 }
 
 #[cfg(test)]
@@ -219,13 +232,17 @@ mod tests {
         // candidate-naming rule rather than mutating process-wide state.
         let named = candidates(temp.path(), "vnl-probe");
         assert!(named.contains(&temp.path().join("vnl-probe")));
-        #[cfg(windows)]
-        assert!(
-            named
-                .iter()
-                .any(|path| path.to_string_lossy().ends_with("vnl-probe.exe")),
-            "PATHEXT candidates must be tried on Windows"
-        );
+        // `cfg!` rather than `#[cfg]`: an attribute on a statement deletes it on every
+        // other platform, which is the shape that broke the build on Linux and macOS.
+        // A condition is compiled everywhere and simply not taken.
+        if cfg!(windows) {
+            assert!(
+                named
+                    .iter()
+                    .any(|path| path.to_string_lossy().ends_with("vnl-probe.exe")),
+                "PATHEXT candidates must be tried on Windows"
+            );
+        }
     }
 
     #[test]

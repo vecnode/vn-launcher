@@ -132,8 +132,46 @@ a special case in `catalog.rs` for one repository, the manifest is missing a fie
 | Fonts | `ui/src/fonts.rs` | `set_fonts` lands on the *next* pass, so the shell installs fonts before the first frame. Text drawn with an unbound family panics. |
 | Card width | `ui/src/widgets.rs` | A frame's contents must be told the width *minus the padding*. Handing them the full width is what once collapsed the detail page. |
 | TLS | `native/src/http.rs` | With default features off, `RootCerts` must be named explicitly or ureq panics on first use. |
+| Platform differences | anywhere with `#[cfg]` | CI runs Linux and macOS, and a Windows machine cannot see what they see. See below. |
 
-## 6. Style
+## 6. What a Windows machine cannot see
+
+CI builds on three platforms, and two of them will disagree with your machine. The
+first push of this repository failed on Linux *and* macOS with `unused_mut`, in code
+that compiled perfectly on Windows:
+
+```rust
+let mut out = vec![directory.join(command)];
+
+#[cfg(windows)]
+if Path::new(command).extension().is_none() {
+    out.push(/* … */);       // on Linux this whole block does not exist
+}
+
+out                          // …so `mut` is unused, and CI denies warnings
+```
+
+An attribute on a **statement** deletes it on the other platforms, which can leave a
+binding unused, a variable unread or a branch unreachable. An attribute on an **item**
+— a function, a `use`, a `struct` — cannot. When behaviour genuinely differs per
+platform, write two functions of the same name under `#[cfg(windows)]` and
+`#[cfg(not(windows))]`, each self-contained; when only a value differs, use `cfg!`.
+
+Before pushing anything with a `#[cfg]` in it, hold the file to a target you are not
+on:
+
+```bash
+rustup target add x86_64-unknown-linux-gnu
+cargo clippy --workspace --all-targets --target x86_64-unknown-linux-gnu -- -D warnings
+```
+
+That needs a Linux C cross-compiler for `ring`, which comes in through `ureq`, so it
+may stop in a dependency rather than in your code. It is still worth running: if it
+reaches your crates, it has checked them. When it cannot, a standalone file carrying
+the same `#[cfg]` shape compiled with `rustc --target x86_64-unknown-linux-gnu
+--crate-type lib -D warnings` is enough to reproduce or clear the question.
+
+## 7. Style
 
 - British spelling in prose and identifiers (`colour`, `behaviour`, `catalogue` in
   prose; `color` only where it is a field name a person might type).
