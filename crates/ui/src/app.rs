@@ -34,12 +34,16 @@ pub struct Ui {
     pub prerelease: bool,
     /// What has been typed into the add-repository field.
     pub add_input: String,
+    /// Where the app being added already lives on this machine.
+    pub local_input: String,
     /// What the last probe of a repository found.
     pub probe: Option<ProbeReport>,
     /// Whether a probe is in flight.
     pub probing: bool,
     /// Whether the About panel is open.
     pub show_about: bool,
+    /// Whether the check-for-updates confirmation is open.
+    pub confirm_check: bool,
     /// The theme last installed, so the style is not rebuilt every frame.
     applied: Option<(ThemeChoice, bool)>,
 }
@@ -55,9 +59,11 @@ impl Ui {
             theme_choice,
             prerelease,
             add_input: String::new(),
+            local_input: String::new(),
             probe: None,
             probing: false,
             show_about: false,
+            confirm_check: false,
             applied: None,
         }
     }
@@ -90,7 +96,7 @@ impl Ui {
                     .fill(theme.palette.bg_base)
                     .inner_margin(Margin::symmetric(SPACE_XL as i8, 0)),
             )
-            .show(root, |ui| self.top_bar(ui, &theme, world, &mut actions));
+            .show(root, |ui| self.top_bar(ui, &theme, world));
 
         egui::CentralPanel::default()
             .frame(
@@ -114,6 +120,9 @@ impl Ui {
 
         if self.show_about {
             self.about_window(&ctx, &theme, &mut actions);
+        }
+        if self.confirm_check {
+            self.confirm_window(&ctx, &theme, world, &mut actions);
         }
 
         actions
@@ -153,7 +162,7 @@ impl Ui {
 
         ui.with_layout(egui::Layout::bottom_up(egui::Align::LEFT), |ui| {
             ui.add_space(SPACE_XS);
-            if widgets::button(ui, theme, ButtonKind::Ghost, Some(Icon::Info), "About", true).clicked() {
+            if widgets::button_full(ui, theme, ButtonKind::Ghost, Some(Icon::Info), "About", true).clicked() {
                 self.show_about = true;
             }
             ui.add_space(SPACE_SM);
@@ -184,13 +193,17 @@ impl Ui {
     }
 
     /// The product mark at the top of the rail.
+    ///
+    /// The mark itself, in the interface's own ink — not a coloured tile. There is one
+    /// mark now: this is the same geometry `assets/logo/` ships and the window icon
+    /// carries, and a second, blue treatment of an older glyph in the corner of the
+    /// window was the previous identity lingering after the rest had moved on.
     fn wordmark(&self, ui: &mut egui::Ui, theme: &Theme) {
         ui.horizontal(|ui| {
             let (rect, _) = ui.allocate_exact_size(vec2(30.0, 30.0), Sense::hover());
-            let painter = ui.painter();
-            painter.rect_filled(rect, CornerRadius::same(9), theme.palette.accent);
-            let inner = rect.shrink(8.0);
-            icons::paint(painter, Icon::Package, inner, theme.palette.on_accent, 1.7);
+            // `Icon::Crystal` scales its own stroke from the box it is given, so there is
+            // no width to pass. See the variant's own documentation.
+            icons::paint(ui.painter(), Icon::Crystal, rect, theme.palette.text_primary, 0.0);
             ui.add_space(SPACE_SM);
             ui.label(
                 RichText::new("vn-launcher")
@@ -277,7 +290,7 @@ impl Ui {
     }
 
     /// The bar above the content.
-    fn top_bar(&mut self, ui: &mut egui::Ui, theme: &Theme, world: &World, actions: &mut Vec<Action>) {
+    fn top_bar(&mut self, ui: &mut egui::Ui, theme: &Theme, world: &World) {
         ui.horizontal_centered(|ui| {
             let title = match (&self.tab, &self.selected) {
                 (Tab::Library, Some(id)) => world
@@ -301,7 +314,10 @@ impl Ui {
                     !world.busy,
                 );
                 if refresh.clicked() {
-                    actions.push(Action::Refresh);
+                    // Reading every repository is one request each against an anonymous
+                    // rate limit, so it asks first rather than spending them on a click
+                    // that was only meant to look.
+                    self.confirm_check = true;
                 }
 
                 if world.busy {
@@ -375,48 +391,143 @@ impl Ui {
             .frame(frame)
             .show(ctx, |ui| {
                 ui.set_max_width(400.0);
-                ui.label(
-                    RichText::new(format!("vn-launcher {}", vnl_core::VERSION))
-                        .font(theme.text.title.clone())
-                        .color(theme.palette.text_primary),
-                );
+
+                // The mark, centred above the name.
+                ui.vertical_centered(|ui| {
+                    let (rect, _) = ui.allocate_exact_size(vec2(56.0, 56.0), Sense::hover());
+                    icons::paint(ui.painter(), Icon::Crystal, rect, theme.palette.text_primary, 0.0);
+                });
+                ui.add_space(SPACE_MD);
+                ui.vertical_centered(|ui| {
+                    ui.label(
+                        RichText::new(format!("vn-launcher {}", vnl_core::VERSION))
+                            .font(theme.text.title.clone())
+                            .color(theme.palette.text_primary),
+                    );
+                });
                 ui.add_space(SPACE_SM);
                 ui.label(
                     RichText::new(
-                        "A launcher for the vecnode applications. It tracks what is on this \
-                         machine, reads each repository's public releases, and starts what you \
-                         already have. No account, no token, no sign-in.",
+                        "Tracks the GitHub repositories you add, reads their public releases, \
+                         and starts what is already installed. No account, no token, no sign-in.",
                     )
                     .font(theme.text.small.clone())
                     .color(theme.palette.text_secondary),
                 );
                 ui.add_space(SPACE_LG);
-                ui.horizontal(|ui| {
-                    if widgets::button(
-                        ui,
-                        theme,
-                        ButtonKind::Secondary,
-                        Some(Icon::External),
-                        "Repository",
-                        true,
-                    )
+                if widgets::button_full(
+                    ui,
+                    theme,
+                    ButtonKind::Secondary,
+                    Some(Icon::External),
+                    "Repository",
+                    true,
+                )
+                .clicked()
+                {
+                    actions.push(Action::OpenUrl(format!(
+                        "https://github.com/{}",
+                        crate::LAUNCHER_REPO
+                    )));
+                }
+                ui.add_space(SPACE_SM);
+                if widgets::button_full(ui, theme, ButtonKind::Ghost, Some(Icon::Close), "Close", true)
                     .clicked()
-                    {
-                        actions.push(Action::OpenUrl(format!(
-                            "https://github.com/{}",
-                            crate::LAUNCHER_REPO
-                        )));
-                    }
-                    if widgets::button(ui, theme, ButtonKind::Ghost, Some(Icon::Close), "Close", true)
-                        .clicked()
-                    {
-                        self.show_about = false;
-                    }
-                });
+                {
+                    self.show_about = false;
+                }
             });
 
         if !open {
             self.show_about = false;
+        }
+    }
+
+    /// Ask before reading every repository.
+    ///
+    /// The top-bar button used to refresh on the spot. A check is not free — it is one
+    /// request per repository against an anonymous rate limit of sixty an hour — so it
+    /// asks first, and says what pressing yes will spend.
+    fn confirm_window(
+        &mut self,
+        ctx: &egui::Context,
+        theme: &Theme,
+        world: &World,
+        actions: &mut Vec<Action>,
+    ) {
+        let mut open = self.confirm_check;
+        let frame = egui::Frame::new()
+            .fill(theme.palette.bg_elevated)
+            .stroke(egui::Stroke::new(1.0, theme.palette.border_subtle))
+            .corner_radius(CornerRadius::same(crate::theme::RADIUS_LG))
+            .inner_margin(Margin::same(SPACE_XL as i8));
+
+        let count = world.apps.len();
+        egui::Window::new("Check for updates")
+            .open(&mut open)
+            .collapsible(false)
+            .resizable(false)
+            .anchor(egui::Align2::CENTER_CENTER, vec2(0.0, 0.0))
+            .frame(frame)
+            .show(ctx, |ui| {
+                ui.set_max_width(380.0);
+                ui.label(
+                    RichText::new(match count {
+                        0 => "There are no repositories to read yet.".to_owned(),
+                        1 => "Read the public releases of the one repository you track?".to_owned(),
+                        n => format!("Read the public releases of all {n} repositories?"),
+                    })
+                    .font(theme.text.body.clone())
+                    .color(theme.palette.text_primary),
+                );
+                ui.add_space(SPACE_SM);
+                ui.label(
+                    RichText::new(if count == 0 {
+                        "Add one from the Add repository tab first."
+                    } else {
+                        "That is one request per repository to GitHub's public API, as an \
+                         anonymous guest. Answers are kept, so a second check in a row does \
+                         not spend a second request."
+                    })
+                    .font(theme.text.small.clone())
+                    .color(theme.palette.text_secondary),
+                );
+                ui.add_space(SPACE_LG);
+
+                ui.columns(2, |columns| {
+                    let yes = widgets::button_full(
+                        &mut columns[0],
+                        theme,
+                        ButtonKind::Primary,
+                        Some(Icon::Refresh),
+                        "Yes, check",
+                        count > 0,
+                    );
+                    if yes.clicked() {
+                        actions.push(Action::Refresh);
+                        self.confirm_check = false;
+                    }
+
+                    let no = widgets::button_full(
+                        &mut columns[1],
+                        theme,
+                        // Secondary rather than Ghost: in a two-button question an
+                        // unbordered "No" reads as a label, not as something to press.
+                        ButtonKind::Secondary,
+                        Some(Icon::Close),
+                        "No",
+                        true,
+                    );
+                    if no.clicked() {
+                        self.confirm_check = false;
+                    }
+                });
+            });
+
+        // The title bar's own close button flips `open` rather than calling back, so
+        // without this the window would close for one frame and return the next.
+        if !open {
+            self.confirm_check = false;
         }
     }
 }

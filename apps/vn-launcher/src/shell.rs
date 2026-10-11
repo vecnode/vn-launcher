@@ -233,11 +233,12 @@ impl Shell {
                 self.ui.probe = None;
                 self.worker.send(Request::Probe(text));
             }
-            Action::AddRepository(slug) => self.add_repository(&slug),
+            Action::AddRepository { repo, local } => self.add_repository(&repo, &local),
             Action::ResetProbe => {
                 self.ui.probe = None;
                 self.ui.probing = false;
                 self.ui.add_input.clear();
+                self.ui.local_input.clear();
             }
             Action::DismissNotice(index) => {
                 if index < self.world.notices.len() {
@@ -334,7 +335,13 @@ impl Shell {
     }
 
     /// Write a repository into the user's catalog and track it.
-    fn add_repository(&mut self, slug: &str) {
+    ///
+    /// `local` is the second half of the flow: the repository says where the code comes
+    /// from, this says where it already is. It is optional, and is stored as text rather
+    /// than validated — the launcher does not need the folder to exist to remember it, and
+    /// refusing a path because a drive is not mounted right now would be worse than
+    /// keeping it.
+    fn add_repository(&mut self, slug: &str, local: &str) {
         let repo = match Repo::parse(slug) {
             Ok(repo) => repo,
             Err(error) => {
@@ -346,17 +353,23 @@ impl Shell {
             }
         };
 
+        let folder = Some(local).filter(|path| !path.trim().is_empty());
         let path = self.paths.user_catalog();
-        match user_catalog::append(&path, &repo) {
+        match user_catalog::append(&path, &repo, folder) {
             Ok(id) => {
                 self.reload_catalog();
                 self.ui.probe = None;
                 self.ui.probing = false;
                 self.ui.add_input.clear();
-                self.notice(Notice::success(format!("Added {repo}")).with_detail(format!(
-                    "Written to {}. Every field the launcher guesses can be overridden there.",
-                    path.display()
-                )));
+                self.ui.local_input.clear();
+                let detail = match folder {
+                    Some(folder) => format!("Written to {}, pointed at {folder}.", path.display()),
+                    None => format!(
+                        "Written to {}. Every field the launcher guesses can be overridden there.",
+                        path.display()
+                    ),
+                };
+                self.notice(Notice::success(format!("Added {repo}")).with_detail(detail));
                 self.check_all();
                 let _ = id;
             }

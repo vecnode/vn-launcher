@@ -40,7 +40,7 @@ pub fn show(ui: &mut egui::Ui, theme: &Theme, world: &World, state: &mut State, 
     }
 
     if let Some(report) = state.probe.clone() {
-        report_card(ui, theme, &report, actions);
+        report_card(ui, theme, &report, state, actions);
         ui.add_space(SPACE_XL);
     }
 
@@ -95,6 +95,7 @@ fn report_card(
     ui: &mut egui::Ui,
     theme: &Theme,
     report: &crate::model::ProbeReport,
+    state: &mut State,
     actions: &mut Vec<Action>,
 ) {
     widgets::card(ui, theme, |ui| {
@@ -158,6 +159,31 @@ fn report_card(
         );
 
         ui.add_space(SPACE_LG);
+        widgets::separator(ui, theme);
+        ui.add_space(SPACE_LG);
+
+        // The second half of the flow. The repository says where the code comes from; this
+        // says where it already is on this machine, which is what the launcher can start.
+        widgets::overline(ui, theme, "Where it already is on this machine");
+        ui.add_space(SPACE_SM);
+        let folder = egui::TextEdit::singleline(&mut state.local_input)
+            .hint_text("optional — the folder you cloned or built it in")
+            .desired_width(f32::INFINITY)
+            .font(theme.text.body.clone())
+            .margin(Margin::symmetric(SPACE_MD as i8, 8));
+        ui.add(folder);
+        ui.add_space(SPACE_SM);
+        ui.label(
+            RichText::new(
+                "Empty is a fine answer: the launcher then looks for the app on this machine's \
+                 PATH instead, as it does today. Reading the folder to find the binary inside \
+                 it comes later.",
+            )
+            .font(theme.text.small.clone())
+            .color(theme.palette.text_tertiary),
+        );
+
+        ui.add_space(SPACE_LG);
         ui.horizontal(|ui| {
             if widgets::button(
                 ui,
@@ -169,7 +195,10 @@ fn report_card(
             )
             .clicked()
             {
-                actions.push(Action::AddRepository(report.repo.clone()));
+                actions.push(Action::AddRepository {
+                    repo: report.repo.clone(),
+                    local: state.local_input.clone(),
+                });
             }
             if widgets::button(ui, theme, ButtonKind::Ghost, Some(Icon::Close), "Discard", true).clicked() {
                 actions.push(Action::ResetProbe);

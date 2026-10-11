@@ -43,13 +43,50 @@ pub enum Icon {
     Plus,
     /// A right-pointing triangle: start.
     Play,
+    /// The launcher's own mark: a girdled crystal.
+    ///
+    /// Unlike every other icon here, this one carries its own stroke weight — the
+    /// caller's `width` is ignored. The mark is a fixed set of straight lines whose
+    /// proportions *are* the design, so its stroke has to scale with the box it is
+    /// drawn in rather than be chosen per call site.
+    Crystal,
     /// A filled circle: a status dot.
     Dot,
 }
 
+/// The launcher's mark, in the 24-unit grid.
+///
+/// A hexagon with a crown ridge to the apex and a girdle across the lower third. Every
+/// endpoint lands on a hexagon vertex or on the central spine, which is what makes the
+/// facets meet instead of crossing. `assets/logo/README.md` describes the shape and the
+/// script that turns it into the distribution set; this is that geometry, in the form
+/// the interface draws it.
+const CRYSTAL_OUTLINE: [(f32, f32); 6] = [
+    (12.0, 2.8),
+    (20.8, 7.4),
+    (20.8, 16.6),
+    (12.0, 21.2),
+    (3.2, 16.6),
+    (3.2, 7.4),
+];
+/// The lid: the top face's two edges meeting at the centre.
+const CRYSTAL_LID: [(f32, f32); 3] = [(3.2, 7.4), (12.0, 12.0), (20.8, 7.4)];
+/// The spine, from the centre down to the lower vertex.
+const CRYSTAL_SPINE: ((f32, f32), (f32, f32)) = ((12.0, 12.0), (12.0, 21.2));
+/// What makes it a crystal rather than a box: the crown ridge, and the girdle that
+/// splits each side face into a trapezoid over a triangle.
+const CRYSTAL_FACETS: [((f32, f32), (f32, f32)); 3] = [
+    ((12.0, 2.8), (12.0, 12.0)),
+    ((12.0, 15.4), (3.2, 16.6)),
+    ((12.0, 15.4), (20.8, 16.6)),
+];
+/// The mark's stroke, in the same 24-unit grid: the application's 1.7 on a 14-unit box.
+const CRYSTAL_STROKE: f32 = 2.914;
+
 /// Draw an icon so that it fills `rect`.
 ///
-/// `width` is the stroke width in points; `1.5` reads well at 16–20 pixels.
+/// `width` is the stroke width in points; `1.5` reads well at 16–20 pixels. It is
+/// ignored by [`Icon::Crystal`], which scales its own stroke instead.
 pub fn paint(painter: &Painter, icon: Icon, rect: Rect, color: Color32, width: f32) {
     let canvas = Canvas { painter, rect };
     let stroke = Stroke::new(width, color);
@@ -171,6 +208,15 @@ pub fn paint(painter: &Painter, icon: Icon, rect: Rect, color: Color32, width: f
                 color,
                 Stroke::NONE,
             ));
+        }
+        Icon::Crystal => {
+            let stroke = Stroke::new(rect.width() * (CRYSTAL_STROKE / 24.0), color);
+            canvas.path(&CRYSTAL_OUTLINE, stroke, true);
+            canvas.path(&CRYSTAL_LID, stroke, false);
+            canvas.line(CRYSTAL_SPINE.0, CRYSTAL_SPINE.1, stroke);
+            for (from, to) in CRYSTAL_FACETS {
+                canvas.line(from, to, stroke);
+            }
         }
         Icon::Dot => {
             canvas.dot((12.0, 12.0), side * 0.22, color);

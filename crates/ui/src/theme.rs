@@ -36,7 +36,12 @@ pub const TOPBAR_HEIGHT: f32 = 56.0;
 /// Narrowest a library card may become before the grid drops a column.
 pub const CARD_MIN_WIDTH: f32 = 300.0;
 /// Height of a library card.
-pub const CARD_HEIGHT: f32 = 184.0;
+///
+/// Sized so that a name, a tagline, a status row, an explanation and the action row all
+/// fit with room to spare at the bottom. It was 184, which left the action row one
+/// padding step off the card's own border whenever anything above it ran to a second
+/// line — close enough to read as touching it.
+pub const CARD_HEIGHT: f32 = 200.0;
 /// Height reserved for a card's or row's action buttons.
 pub const ACTION_ROW_HEIGHT: f32 = 32.0;
 

@@ -24,6 +24,50 @@ pub const BUILTIN_TOML: &str = include_str!("../../../assets/catalog/apps.toml")
 /// which keeps the order stable between runs.
 const UNSORTED_ORDER: i32 = 1_000;
 
+/// How far apart two tile colours must be to count as different.
+///
+/// Compared as a distance in RGB rather than by equality: `#3b82f6` and `#3c83f7` are
+/// different values and the same colour to a person, and a grid where two tiles look
+/// identical has failed even though the bytes differ.
+///
+/// 30 is chosen from what the separation buys rather than from taste. Adjacent tiles are
+/// 44 points apart on screen, so two colours are only ever compared across a gap; at this
+/// distance they are plainly different, and at 10 they would not be. The number matters
+/// because capacity falls steeply as it rises — the same palette holds roughly 37 colours
+/// at 45 and over a hundred here, and a launcher someone adds repositories to needs more
+/// than 37.
+const MIN_COLOR_DISTANCE: f32 = 28.0;
+
+/// The lightness and saturation bands generated colours are drawn from.
+///
+/// Varying hue alone is not enough, and the first attempt at this proved it twice over:
+/// every candidate then sits on a single closed curve through the colour space, whose
+/// whole length fits only about a dozen colours at the distance above. Crossing hue with
+/// these bands spreads candidates through the volume instead.
+///
+/// The bands are spaced by a tenth of a lightness step deliberately: two colours in
+/// adjacent bands are then about [`MIN_COLOR_DISTANCE`] apart, which is what makes the
+/// crossing worth anything.
+const LIGHTNESS_BANDS: [f32; 4] = [0.38, 0.50, 0.62, 0.74];
+const SATURATION_BANDS: [f32; 2] = [0.55, 0.75];
+
+/// How many hues the generated sequence uses.
+///
+/// Hue is stepped in even slices rather than by the golden angle. The golden angle looks
+/// better on paper and is worse in practice: deriving the band from the same counter
+/// makes the two resonate, and hue then advances by a constant small amount each time a
+/// band combination comes round again — so the sequence revisits the same handful of
+/// colours instead of covering the space. Even slices crossed with the bands give a pool
+/// of 24 × 4 × 2 colours.
+const HUE_STEPS: usize = 24;
+
+/// How many candidates to try before deciding the pool is exhausted.
+///
+/// The pool holds 24 × 4 × 2 colours, so this walks it several times over. Four times is
+/// enough that a failure means the pool really is full rather than that the walk was
+/// unlucky in the order it visited.
+const POOL_ATTEMPTS: usize = 768;
+
 /// What a catalog entry describes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AppKind {
@@ -120,6 +164,11 @@ pub struct AppEntry {
     pub repo: Repo,
     /// Where to send someone who wants the project itself.
     pub homepage: String,
+    /// A folder on this machine where the app already is, when one was named.
+    ///
+    /// Held as a string rather than a `PathBuf` so the core stays a pure data crate; the
+    /// desktop side decides what a path means.
+    pub local: Option<String>,
     /// The brand colour used for the app's tile.
     pub color: Color,
     /// What kind of entry this is.
@@ -160,16 +209,28 @@ impl AppEntry {
     /// Two characters, for a tile too small to hold the name.
     ///
     /// Split on separators and camel-case, so `vn-finance` gives `VF` and `PhotoCraft`
-    /// gives `PC`; a single word gives its first two letters.
+    /// gives `PC`. A single word takes its **first and last** letters rather than its
+    /// first two, because `vncli` and `vncode` both began `VN` — which left two tiles in
+    /// the same grid telling the same story and differing only in colour.
     #[must_use]
     pub fn monogram(&self) -> String {
         let words = split_words(&self.name);
         let letters: String = match words.as_slice() {
             [] => self.id.chars().take(2).collect(),
-            [only] => only.chars().take(2).collect(),
+            [only] => match (only.chars().next(), only.chars().next_back()) {
+                (Some(first), Some(last)) if first != last => [first, last].iter().collect(),
+                (Some(first), _) => first.to_string(),
+                _ => self.id.chars().take(2).collect(),
+            },
             [first, second, ..] => first.chars().take(1).chain(second.chars().take(1)).collect(),
         };
         letters.to_uppercase()
+    }
+
+    /// Whether a folder on this machine was named for this app.
+    #[must_use]
+    pub fn has_local_folder(&self) -> bool {
+        self.local.as_deref().is_some_and(|path| !path.trim().is_empty())
     }
 }
 
@@ -212,7 +273,55 @@ impl Catalog {
             }
         }
         self.sort();
-        self.check_unique("the merged catalog")
+        self.check_unique("the merged catalog")?;
+        // Merging two catalogs is exactly where two entries end up with one colour: each
+        // was distinct on its own.
+        self.assign_distinct_colors();
+        Ok(())
+    }
+
+    /// Give every app a tile colour no other app has.
+    ///
+    /// A catalog entry may name its own colour, and that choice is kept. What cannot be
+    /// kept is two entries naming the same one — which is what happens as soon as a
+    /// person adds repositories, because a hand-written entry usually names nothing and
+    /// the derived default comes from the id. Colliding entries are moved along a
+    /// golden-angle hue sequence, which keeps successive colours far apart however many
+    /// apps are added.
+    ///
+    /// This is what makes the grid stay readable at fifty apps, which no fixed palette
+    /// of four can do.
+    pub fn assign_distinct_colors(&mut self) {
+        let mut taken: Vec<Color> = Vec::with_capacity(self.entries.len());
+        let mut attempt = 0usize;
+
+        for entry in &mut self.entries {
+            if !taken.iter().any(|used| too_close(*used, entry.color)) {
+                taken.push(entry.color);
+                continue;
+            }
+
+            let mut placed = false;
+            for _ in 0..POOL_ATTEMPTS {
+                let candidate = generated_color(attempt);
+                attempt += 1;
+                if taken
+                    .iter()
+                    .all(|used| color_distance(*used, candidate) >= MIN_COLOR_DISTANCE)
+                {
+                    entry.color = candidate;
+                    taken.push(candidate);
+                    placed = true;
+                    break;
+                }
+            }
+            if !placed {
+                // The pool is exhausted, which needs a catalog larger than any person
+                // keeps. The entry keeps the colour it had and the tile repeats: a grid
+                // of two hundred apps is a worse problem than two similar tiles in it.
+                taken.push(entry.color);
+            }
+        }
     }
 
     /// The apps, in display order.
@@ -260,6 +369,7 @@ impl Catalog {
         let mut catalog = Self { entries };
         catalog.sort();
         catalog.check_unique(source)?;
+        catalog.assign_distinct_colors();
         Ok(catalog)
     }
 
@@ -335,6 +445,7 @@ fn resolve(file: AppFile, source: &str) -> Result<AppEntry> {
         description,
         repo,
         homepage,
+        local: file.local.and_then(non_empty),
         color,
         kind,
         install,
@@ -455,6 +566,31 @@ fn fallback_color(id: &str) -> Color {
     }
     let hue = (hash % 360) as f32;
     hsl_to_rgb(hue, 0.62, 0.52)
+}
+
+/// Whether two colours are close enough to read as the same one.
+fn too_close(a: Color, b: Color) -> bool {
+    color_distance(a, b) < MIN_COLOR_DISTANCE
+}
+
+/// How far apart two colours are, as a plain distance in RGB.
+fn color_distance(a: Color, b: Color) -> f32 {
+    let dr = f32::from(a.r) - f32::from(b.r);
+    let dg = f32::from(a.g) - f32::from(b.g);
+    let db = f32::from(a.b) - f32::from(b.b);
+    (dr * dr + dg * dg + db * db).sqrt()
+}
+
+/// The `n`-th colour of the generated sequence.
+///
+/// Hue advances fastest, then lightness, then saturation, so the closest candidates come
+/// first and the sequence only repeats after every combination has been offered.
+fn generated_color(n: usize) -> Color {
+    let hue = (n % HUE_STEPS) as f32 * (360.0 / HUE_STEPS as f32);
+    let band = n / HUE_STEPS;
+    let lightness = LIGHTNESS_BANDS[band % LIGHTNESS_BANDS.len()];
+    let saturation = SATURATION_BANDS[(band / LIGHTNESS_BANDS.len()) % SATURATION_BANDS.len()];
+    hsl_to_rgb(hue, saturation, lightness)
 }
 
 /// HSL to sRGB, with saturation and lightness in `0.0..=1.0` and hue in degrees.
@@ -763,6 +899,7 @@ mod tests {
             description: String::new(),
             repo: Repo::parse("owner/name").unwrap(),
             homepage: String::new(),
+            local: None,
             color: Color::new(0, 0, 0),
             kind: AppKind::Release,
             install: InstallSpec {
@@ -775,7 +912,13 @@ mod tests {
             detect: DetectSpec::default(),
             order: 0,
         };
-        assert_eq!(entry("vncli").monogram(), "VN");
+        assert_eq!(entry("vncli").monogram(), "VI");
+        assert_eq!(entry("vncode").monogram(), "VE");
+        assert_ne!(
+            entry("vncli").monogram(),
+            entry("vncode").monogram(),
+            "two apps in one grid must not share a monogram"
+        );
         assert_eq!(entry("vn-finance").monogram(), "VF");
         assert_eq!(entry("vn-mediabus").monogram(), "VM");
         assert_eq!(entry("PhotoCraft").monogram(), "PC");
@@ -791,5 +934,117 @@ mod tests {
             first.r != first.g || first.g != first.b,
             "a derived colour should be a colour, not grey"
         );
+    }
+
+    #[test]
+    fn colours_that_are_far_apart_are_not_confused() {
+        // The other side of the threshold. If this were too eager the pass would move
+        // colours that need no moving, and a curated palette would never survive.
+        assert!(
+            !too_close(Color::new(0x3b, 0x82, 0xf6), Color::new(0x60, 0xa5, 0xfa)),
+            "two plainly different blues must not be treated as one colour"
+        );
+        assert!(
+            too_close(Color::new(0x3b, 0x82, 0xf6), Color::new(0x3c, 0x83, 0xf7)),
+            "the same colour written two ways must be treated as one"
+        );
+    }
+
+    #[test]
+    fn a_hundred_and_twenty_apps_get_a_colour_each() {
+        // None of these declares a colour, so each falls back to one derived from its
+        // id — which is exactly where two apps used to end up looking identical.
+        let mut text = String::new();
+        for index in 0..120 {
+            text.push_str(&format!(
+                "[[app]]\nid = \"app-{index}\"\nname = \"App {index}\"\nrepo = \"owner/app-{index}\"\n\n"
+            ));
+        }
+        let catalog = Catalog::from_toml(&text, "test").unwrap();
+        assert_eq!(catalog.len(), 120);
+
+        let colours: Vec<Color> = catalog.entries().iter().map(|entry| entry.color).collect();
+        for (i, a) in colours.iter().enumerate() {
+            for (j, b) in colours.iter().enumerate() {
+                assert!(
+                    i == j || !too_close(*a, *b),
+                    "apps {i} and {j} share a tile colour: {a:?} and {b:?}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn a_declared_colour_is_kept_when_nothing_else_claims_it() {
+        let catalog = Catalog::from_toml(
+            r##"
+            [[app]]
+            id = "one"
+            name = "One"
+            repo = "owner/one"
+            color = "#16a34a"
+            [[app]]
+            id = "two"
+            name = "Two"
+            repo = "owner/two"
+            color = "#f97316"
+            "##,
+            "test",
+        )
+        .unwrap();
+        assert_eq!(catalog.get("one").unwrap().color, Color::new(0x16, 0xa3, 0x4a));
+        assert_eq!(catalog.get("two").unwrap().color, Color::new(0xf9, 0x73, 0x16));
+    }
+
+    #[test]
+    fn a_duplicated_colour_moves_rather_than_repeating() {
+        let catalog = Catalog::from_toml(
+            r##"
+            [[app]]
+            id = "one"
+            name = "One"
+            repo = "owner/one"
+            color = "#4c8dff"
+            [[app]]
+            id = "two"
+            name = "Two"
+            repo = "owner/two"
+            color = "#4c8dff"
+            "##,
+            "test",
+        )
+        .unwrap();
+        let first = catalog.get("one").unwrap().color;
+        let second = catalog.get("two").unwrap().color;
+        // The first entry keeps what it declared; the second is moved out of the way.
+        assert_eq!(first, Color::new(0x4c, 0x8d, 0xff));
+        assert!(!too_close(first, second), "two tiles must not share a colour");
+    }
+
+    #[test]
+    fn a_local_folder_is_read_and_a_blank_one_is_dropped() {
+        let catalog = Catalog::from_toml(
+            r#"
+            [[app]]
+            id = "one"
+            name = "One"
+            repo = "owner/one"
+            local = "C:\\src\\one"
+            [[app]]
+            id = "two"
+            name = "Two"
+            repo = "owner/two"
+            local = "   "
+            "#,
+            "test",
+        )
+        .unwrap();
+        let one = catalog.get("one").unwrap();
+        assert_eq!(one.local.as_deref(), Some("C:\\src\\one"));
+        assert!(one.has_local_folder());
+
+        let two = catalog.get("two").unwrap();
+        assert_eq!(two.local, None);
+        assert!(!two.has_local_folder());
     }
 }

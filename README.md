@@ -7,9 +7,9 @@
 
 # vn-launcher
 
-**One window for the vecnode applications.** See what is on your machine.
+**One window for the personal applications.** See what is on your machine.
 
-vn-launcher is a native desktop application that keeps track of the vecnode/vn apps.
+vn-launcher is a native desktop application optimised for vecnode/vn apps but designed for all apps.
 
 [![License: MIT](https://img.shields.io/badge/license-MIT-3fb950.svg)](LICENSE)
 [![Rust 1.95+](https://img.shields.io/badge/rust-1.95%2B-dea584.svg?logo=rust&logoColor=white)](#requirements)

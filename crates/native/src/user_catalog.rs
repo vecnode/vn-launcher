@@ -36,14 +36,19 @@ pub fn load(path: &Path) -> Result<Option<Catalog>> {
 
 /// Add a repository to the user's catalog, or replace an existing entry for it.
 ///
-/// The entry written is the smallest one that says something: an id, a display name
-/// and the repository. Everything else — asset stems, extensions, brand colour,
-/// platform matching — is inferred by the launcher, and a person who wants to
-/// override any of it can edit the file afterwards.
+/// The entry written is the smallest one that says something: an id, a display name,
+/// the repository, and — when one was named — the folder on this machine where it already
+/// lives. Everything else — asset stems, extensions, brand colour, platform matching — is
+/// inferred by the launcher, and a person who wants to override any of it can edit the
+/// file afterwards.
+///
+/// `local` is the second half of the add-repository flow: the repository says where the
+/// code comes from, the folder says where it already is. Passing `None` leaves an existing
+/// folder alone rather than clearing it, so re-adding a repository does not forget it.
 ///
 /// # Errors
 /// Returns [`Error::Io`] when the file cannot be read or written.
-pub fn append(path: &Path, repo: &Repo) -> Result<String> {
+pub fn append(path: &Path, repo: &Repo, local: Option<&str>) -> Result<String> {
     let mut document = match std::fs::read_to_string(path) {
         Ok(text) => toml::from_str::<CatalogFile>(&text).unwrap_or_else(|_| CatalogFile::empty()),
         Err(_) => CatalogFile::empty(),
@@ -51,6 +56,17 @@ pub fn append(path: &Path, repo: &Repo) -> Result<String> {
     document.version = SCHEMA_VERSION;
 
     let id = derive_id(repo.name());
+    let kept = document
+        .apps
+        .iter()
+        .find(|app| app.id == id)
+        .and_then(|app| app.local.clone());
+    let local = local
+        .map(str::trim)
+        .filter(|folder| !folder.is_empty())
+        .map(str::to_owned)
+        .or(kept);
+
     document.apps.retain(|app| app.id != id);
     document.apps.push(AppFile {
         id: id.clone(),
@@ -61,6 +77,7 @@ pub fn append(path: &Path, repo: &Repo) -> Result<String> {
         homepage: None,
         color: None,
         kind: None,
+        local,
         // After the curated entries, so adding something does not displace them.
         order: None,
         install: None,
@@ -158,7 +175,7 @@ mod tests {
         let path = temp.path().join("apps.toml");
         let repo = Repo::parse("vecnode/vecnode.github.io").unwrap();
 
-        let id = append(&path, &repo).unwrap();
+        let id = append(&path, &repo, None).unwrap();
         assert_eq!(id, "vecnode-github-io");
         assert!(path.exists());
 
@@ -175,8 +192,8 @@ mod tests {
         let path = temp.path().join("apps.toml");
         let repo = Repo::parse("vecnode/vncli").unwrap();
 
-        append(&path, &repo).unwrap();
-        append(&path, &repo).unwrap();
+        append(&path, &repo, None).unwrap();
+        append(&path, &repo, None).unwrap();
 
         let text = std::fs::read_to_string(&path).unwrap();
         assert_eq!(text.matches("id = \"vncli\"").count(), 1, "{text}");
@@ -186,13 +203,55 @@ mod tests {
     fn an_existing_entry_for_another_repository_is_kept() {
         let temp = tempfile::tempdir().unwrap();
         let path = temp.path().join("apps.toml");
-        append(&path, &Repo::parse("vecnode/vncli").unwrap()).unwrap();
-        append(&path, &Repo::parse("vecnode/vncode").unwrap()).unwrap();
+        append(&path, &Repo::parse("vecnode/vncli").unwrap(), None).unwrap();
+        append(&path, &Repo::parse("vecnode/vncode").unwrap(), None).unwrap();
 
         let catalog = load(&path).unwrap().unwrap();
         assert_eq!(catalog.len(), 2);
         assert!(catalog.get("vncli").is_some());
         assert!(catalog.get("vncode").is_some());
+    }
+
+    #[test]
+    fn a_named_folder_is_written_and_survives_a_second_add() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("apps.toml");
+        let repo = Repo::parse("vecnode/vncli").unwrap();
+
+        let id = append(&path, &repo, Some("C:\\src\\vncli")).unwrap();
+        let catalog = load(&path).unwrap().unwrap();
+        let entry = catalog.get(&id).unwrap();
+        assert_eq!(entry.local.as_deref(), Some("C:\\src\\vncli"));
+        assert!(entry.has_local_folder());
+
+        // Adding the same repository again without naming a folder must not forget one.
+        append(&path, &repo, None).unwrap();
+        let catalog = load(&path).unwrap().unwrap();
+        assert_eq!(
+            catalog.get(&id).unwrap().local.as_deref(),
+            Some("C:\\src\\vncli"),
+            "re-adding a repository should not lose where it lives"
+        );
+
+        // Naming a different one replaces it.
+        append(&path, &repo, Some("D:\\elsewhere")).unwrap();
+        let catalog = load(&path).unwrap().unwrap();
+        assert_eq!(catalog.get(&id).unwrap().local.as_deref(), Some("D:\\elsewhere"));
+    }
+
+    #[test]
+    fn a_blank_folder_is_written_as_nothing_at_all() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("apps.toml");
+        let repo = Repo::parse("vecnode/vncode").unwrap();
+
+        let id = append(&path, &repo, Some("   ")).unwrap();
+        let catalog = load(&path).unwrap().unwrap();
+        assert_eq!(catalog.get(&id).unwrap().local, None);
+
+        // And it is left out of the file rather than written as an empty string.
+        let text = std::fs::read_to_string(&path).unwrap();
+        assert!(!text.contains("local"), "{text}");
     }
 
     #[test]
@@ -202,7 +261,7 @@ mod tests {
         std::fs::write(&path, "this is not toml at all {{{").unwrap();
         assert!(load(&path).is_err());
         // ...but appending still succeeds, by starting again rather than refusing.
-        append(&path, &Repo::parse("vecnode/vncli").unwrap()).unwrap();
+        append(&path, &Repo::parse("vecnode/vncli").unwrap(), None).unwrap();
         assert!(load(&path).unwrap().is_some());
     }
 }

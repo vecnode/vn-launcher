@@ -244,18 +244,9 @@ fn about(ui: &mut egui::Ui, theme: &Theme, world: &World, actions: &mut Vec<Acti
             false,
         );
 
-        ui.add_space(SPACE_LG);
-        widgets::overline(ui, theme, "What this launcher will never ask you for");
-        ui.add_space(SPACE_SM);
-        ui.label(
-            RichText::new(
-                "An account, a token, a sign-in, or a payment. Every request goes to GitHub's \
-                 public API as an anonymous guest.",
-            )
-            .font(theme.text.small.clone())
-            .color(theme.palette.text_secondary),
-        );
-
+        // Only what the launcher can be held to. An earlier version of this card also
+        // promised what it would "never ask you for", which is a claim about a future
+        // nobody has written yet rather than a fact about this build.
         ui.add_space(SPACE_LG);
         widgets::overline(ui, theme, "What is not switched on yet");
         ui.add_space(SPACE_SM);

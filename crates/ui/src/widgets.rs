@@ -155,6 +155,35 @@ pub fn button(
     text: &str,
     enabled: bool,
 ) -> Response {
+    button_impl(ui, theme, kind, icon, text, enabled, None)
+}
+
+/// The same button, stretched across the width available.
+///
+/// The rail's About sits directly above the navigation, and a button that hugged its
+/// label there would read as a different kind of thing from the items beside it.
+pub fn button_full(
+    ui: &mut Ui,
+    theme: &Theme,
+    kind: ButtonKind,
+    icon: Option<Icon>,
+    text: &str,
+    enabled: bool,
+) -> Response {
+    let width = ui.available_width();
+    button_impl(ui, theme, kind, icon, text, enabled, Some(width))
+}
+
+/// The one implementation behind [`button`] and [`button_full`].
+fn button_impl(
+    ui: &mut Ui,
+    theme: &Theme,
+    kind: ButtonKind,
+    icon: Option<Icon>,
+    text: &str,
+    enabled: bool,
+    width_override: Option<f32>,
+) -> Response {
     let palette = &theme.palette;
     let (base, hover, pressed, foreground, stroke) = match kind {
         ButtonKind::Primary => (
@@ -194,7 +223,7 @@ pub fn button(
     let icon_size = 15.0;
     let gap = if icon.is_some() { SPACE_SM } else { 0.0 };
     let width = galley.size().x + if icon.is_some() { icon_size + gap } else { 0.0 } + SPACE_MD * 2.0;
-    let size = vec2(width.max(64.0), 32.0);
+    let size = vec2(width_override.unwrap_or(width.max(64.0)), 32.0);
 
     let sense = if enabled { Sense::click() } else { Sense::hover() };
     let (rect, response) = ui.allocate_exact_size(size, sense);

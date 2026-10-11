@@ -304,8 +304,16 @@ pub enum Action {
     OpenInstallRoot,
     /// Inspect a repository without adding it.
     CheckRepository(String),
-    /// Add a repository to the user's catalog.
-    AddRepository(String),
+    /// Add a repository to the user's catalog, and point it at a folder on this machine.
+    ///
+    /// Named rather than positional: the two are both strings and mean completely different
+    /// things, and `AddRepository(slug, folder)` would be an easy pair to transpose.
+    AddRepository {
+        /// `owner/name`, as read from the field.
+        repo: String,
+        /// Where the app already lives on this machine; empty when none was named.
+        local: String,
+    },
     /// Dismiss one notice.
     DismissNotice(usize),
     /// Dismiss every notice.

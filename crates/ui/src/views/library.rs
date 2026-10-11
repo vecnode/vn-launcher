@@ -58,15 +58,25 @@ pub fn show(ui: &mut egui::Ui, theme: &Theme, world: &World, state: &mut State, 
         ),
     );
 
+    // Cards are placed by hand rather than with a grid, so that the gaps are the ones the
+    // arithmetic above assumed. `horizontal` adds the style's own item spacing between
+    // children *on top of* any explicit space, and those extra eight points per gap are
+    // what used to push the last card of a row past the right margin — the row was
+    // `8 × (columns - 1)` wider than the width the columns were computed from.
     let gap = SPACE_LG;
     let available = ui.available_width();
     let columns = (((available + gap) / (CARD_MIN_WIDTH + gap)).floor() as usize).clamp(1, 4);
     let width = ((available - gap * columns.saturating_sub(1) as f32) / columns as f32)
         .floor()
-        .max(240.0);
+        // Never ask for more than there is. With one narrow column the subtraction above
+        // hands back the whole width, and a floor applied afterwards could only overflow.
+        .min(available)
+        .max(1.0);
 
-    for chunk in cards.chunks(columns) {
+    let rows = cards.len().div_ceil(columns);
+    for (row, chunk) in cards.chunks(columns).enumerate() {
         ui.horizontal(|ui| {
+            ui.spacing_mut().item_spacing.x = 0.0;
             for (index, card) in chunk.iter().enumerate() {
                 if index > 0 {
                     ui.add_space(gap);
@@ -81,7 +91,11 @@ pub fn show(ui: &mut egui::Ui, theme: &Theme, world: &World, state: &mut State, 
                 );
             }
         });
-        ui.add_space(gap);
+        // No trailing gap after the last row: it would be space the scroll area counts
+        // and nothing ever occupies.
+        if row + 1 < rows {
+            ui.add_space(gap);
+        }
     }
 }
 
@@ -194,10 +208,15 @@ fn card_contents(ui: &mut egui::Ui, theme: &Theme, card: &AppCard, width: f32, a
         .wrap_mode(egui::TextWrapMode::Truncate),
     );
 
-    // Pin the action row to the bottom of the card. This takes up the slack
-    // explicitly rather than asking egui for a bottom-up layout: the slack is known
-    // exactly, and a card is a fixed-size box, so there is nothing to negotiate.
-    let slack = ui.available_height() - ACTION_ROW_HEIGHT;
+    // Pin the action row to the bottom of the card, keeping a margin under it. This takes
+    // up the slack explicitly rather than asking egui for a bottom-up layout: the slack is
+    // known exactly, and a card is a fixed-size box, so there is nothing to negotiate.
+    //
+    // The margin is the point of it. Reserving only the row's own height put its lower
+    // edge one padding step above the border, which is the same distance as the sides —
+    // but a button has a border of its own and reads as closer than it measures, so the
+    // row gets `SPACE_MD` of clearance as well.
+    let slack = ui.available_height() - ACTION_ROW_HEIGHT - SPACE_MD;
     if slack > 0.0 {
         ui.add_space(slack);
     }

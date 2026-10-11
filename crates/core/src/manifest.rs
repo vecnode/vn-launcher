@@ -65,6 +65,14 @@ pub struct AppFile {
     /// `release` (installs from GitHub Releases) or `link` (opens a page).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub kind: Option<String>,
+    /// A folder on this machine where the app already lives — a clone, a build, or
+    /// wherever a person keeps it. Set by the add-repository flow, which asks for the
+    /// repository first and the local place second.
+    ///
+    /// It sits with the scalars, above the tables: TOML requires a table's plain values
+    /// to precede its sub-tables, and the serialiser writes fields in declaration order.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub local: Option<String>,
     /// Display position; lower sorts first. Ties fall back to the id.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub order: Option<i32>,
@@ -144,6 +152,7 @@ mod tests {
                 homepage: None,
                 color: Some("#3b82f6".to_owned()),
                 kind: None,
+                local: None,
                 order: None,
                 install: Some(InstallFile {
                     stems: vec!["my-tool".to_owned()],
@@ -196,6 +205,7 @@ mod tests {
                 homepage: None,
                 color: None,
                 kind: None,
+                local: None,
                 order: None,
                 install: None,
                 launch: None,
@@ -223,6 +233,7 @@ mod tests {
                 homepage: None,
                 color: None,
                 kind: Some("link".to_owned()),
+                local: None,
                 order: None,
                 install: None,
                 launch: None,

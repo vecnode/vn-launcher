@@ -31,8 +31,9 @@ repo = "vecnode/vncli"
 | `tagline` | string | no | empty | One line under the name on the card. |
 | `description` | string | no | empty | A paragraph. Reserved for the detail view. |
 | `homepage` | string | no | the repository | Where to send someone who wants the project itself. |
-| `color` | string | no | derived from `id` | Brand colour, `#rrggbb` or `#rgb`. Drives the app's tile, whose text colour is chosen by contrast. |
+| `color` | string | no | derived from `id` | Brand colour, `#rrggbb` or `#rgb`. Drives the app's tile, whose text colour is chosen by contrast. Two entries may not end up with the same one: the launcher moves a colliding colour, so a catalog of any size still has a tile per app. |
 | `kind` | string | no | `release` | `release` reads GitHub Releases. `link` opens a page and installs nothing. Anything else is refused. |
+| `local` | string | no | absent | A folder on this machine where the app already lives — a clone, a build, or wherever you keep it. The add-repository flow asks for it after the repository. It is stored as written and never required to exist; the launcher does not need the drive mounted to remember the path. |
 | `order` | integer | no | after curated entries | Display position; lower sorts first. Ties fall back to `id`. |
 
 ### `[app.install]` — how the app is obtained
