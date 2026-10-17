@@ -19,7 +19,28 @@ repo = "vecnode/vncli"
 | Key | Type | Required | Meaning |
 |---|---|---|---|
 | `version` | integer | no (default `1`) | Schema version. A file claiming a version this build does not understand is refused with a message naming both. |
+| `removed` | array of strings | no | Ids of apps this document removes. Applied after every layer is merged, so a removed app stays removed even when it is one the launcher ships with. See below. |
 | `[[app]]` | array of tables | no | The apps. Each is one `[[app]]` block. |
+
+### `removed`
+
+A merge can add or replace an entry but never delete one, and the shipped catalog is
+compiled into the binary — so removing an app an app has to be expressible as a fact in
+the document rather than as the absence of one:
+
+```toml
+version = 1
+removed = ["vncli"]
+```
+
+- Ids are matched case-insensitively and trimmed; an id that names nothing is ignored
+  rather than an error, so a stale tombstone cannot stop the launcher starting.
+- The list is applied **after** the user's entries are merged over the built-in ones, and
+  after an override of the same id, which is what a person pressing **Remove** expects.
+- Adding a repository whose derived id is in the list takes it back out. That is the undo.
+- `removed` is a plain value and sits above `[[app]]`, because TOML requires a
+  document's values to precede its array of tables. (The serialiser writes them in that
+  order.)
 
 ## `[[app]]`
 
@@ -108,9 +129,10 @@ substituted:
 | `{bin}` | The resolved executable: where detection found the app, or `<install>/<binary>` (plus `.exe` on Windows). |
 | `{install}` | The app's install directory. |
 
-The table is **optional, and its absence is meaningful**: `vncode` is a DeepSeek
-Harness plugin pack rather than a program, so it declares no launch command and the
-launcher offers to install it without pretending it can start it.
+The table is **optional, and its absence is meaningful**: an app that installs into
+something else rather than running on its own — a plugin pack, a library — declares no
+launch command, and the launcher then offers to install it without pretending it can start
+it. (`vncode`, which the launcher used to ship, was exactly that shape.)
 
 A vector whose first element contains a path separator is a portability smell; the
 catalog test suite checks for it. Use `{bin}` or a bare command name.
@@ -134,7 +156,8 @@ cannot hang on a subprocess.
 **Detection can only ever produce `InstallState::Found`, never `Managed`.** An app
 the launcher did not install cannot be updated or removed by it. This is not a
 limitation to be worked around; it is the property that stops the launcher deleting
-somebody's work.
+somebody's work. What turns a directory into `Managed` is the launcher's own install
+record beside it — see `docs/INSTALL.md` §3.
 
 ## Errors
 

@@ -25,8 +25,20 @@ pub struct CatalogFile {
     /// The schema version the document was written against.
     #[serde(default = "default_schema_version")]
     pub version: u32,
+    /// Apps the person took out of the launcher, by id.
+    ///
+    /// A merge can only ever add or replace an entry, never delete one, and the file
+    /// that ships with the launcher is compiled into the binary — so "remove this app"
+    /// has to be expressible as a *fact in the document* rather than as the absence of
+    /// one. Each id named here is dropped from the merged catalog, whatever layer it
+    /// came from, and adding the repository again takes the id back out.
+    ///
+    /// It sits above `apps` because TOML requires a document's plain values to precede
+    /// its array of tables.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub removed: Vec<String>,
     /// The apps it declares.
-    #[serde(default, rename = "app")]
+    #[serde(default, rename = "app", skip_serializing_if = "Vec::is_empty")]
     pub apps: Vec<AppFile>,
 }
 
@@ -36,6 +48,7 @@ impl CatalogFile {
     pub fn empty() -> Self {
         Self {
             version: SCHEMA_VERSION,
+            removed: Vec::new(),
             apps: Vec::new(),
         }
     }
@@ -143,6 +156,7 @@ mod tests {
     fn a_document_round_trips_through_toml() {
         let original = CatalogFile {
             version: SCHEMA_VERSION,
+            removed: vec!["vncode".to_owned()],
             apps: vec![AppFile {
                 id: "my-tool".to_owned(),
                 name: "My Tool".to_owned(),
@@ -182,6 +196,7 @@ mod tests {
         );
 
         let reparsed: CatalogFile = toml::from_str(&text).unwrap();
+        assert_eq!(reparsed.removed, ["vncode"]);
         assert_eq!(reparsed.apps.len(), 1);
         let app = &reparsed.apps[0];
         assert_eq!(app.id, "my-tool");
@@ -193,9 +208,56 @@ mod tests {
     }
 
     #[test]
+    fn a_document_with_one_removal_and_no_apps_is_two_lines() {
+        // Exactly the shape pressing Remove writes over a built-in app: a version and a
+        // tombstone, with no empty `app = []` for a person to wonder about.
+        let with_one = CatalogFile {
+            removed: vec!["gone".to_owned()],
+            ..CatalogFile::empty()
+        };
+        let text = toml::to_string_pretty(&with_one).unwrap();
+        assert!(!text.contains("app"), "{text}");
+        assert!(text.contains("removed = [\"gone\"]"), "{text}");
+
+        let with_none = toml::to_string_pretty(&CatalogFile::empty()).unwrap();
+        assert!(!with_none.contains("removed"), "{with_none}");
+    }
+
+    #[test]
+    fn removals_are_written_above_the_apps() {
+        let document = CatalogFile {
+            removed: vec!["gone".to_owned()],
+            apps: vec![AppFile {
+                id: "a".to_owned(),
+                name: "A".to_owned(),
+                tagline: None,
+                description: None,
+                repo: "owner/a".to_owned(),
+                homepage: None,
+                color: None,
+                kind: None,
+                local: None,
+                order: None,
+                install: None,
+                launch: None,
+                detect: None,
+            }],
+            ..CatalogFile::empty()
+        };
+        let text = toml::to_string_pretty(&document).unwrap();
+        // TOML requires a document's plain values to precede its array of tables, so the
+        // order of these two fields is not cosmetic: swapped, the file cannot be read back.
+        let removed_position = text.find("removed").unwrap();
+        let apps_position = text.find("[[app]]").unwrap();
+        assert!(removed_position < apps_position, "{text}");
+        assert!(toml::from_str::<CatalogFile>(&text).is_ok(), "{text}");
+    }
+
+    #[test]
     fn absent_optional_fields_are_left_out_entirely() {
         let document = CatalogFile {
             version: SCHEMA_VERSION,
+            removed: Vec::new(),
             apps: vec![AppFile {
                 id: "a".to_owned(),
                 name: "A".to_owned(),
@@ -224,6 +286,7 @@ mod tests {
 
         let document = CatalogFile {
             version: SCHEMA_VERSION,
+            removed: Vec::new(),
             apps: vec![AppFile {
                 id: "vecnode-site".to_owned(),
                 name: "vecnode.github.io".to_owned(),

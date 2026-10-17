@@ -258,7 +258,53 @@ impl Catalog {
     /// [`Error::BadColor`] or [`Error::BadExtension`] for a value that cannot be used.
     pub fn from_toml(text: &str, source: &str) -> Result<Self> {
         let file: CatalogFile = toml::from_str(text).map_err(|e| Error::Catalog(format!("{source}: {e}")))?;
-        Self::from_file(file, source)
+        Self::from_document(file, source)
+    }
+
+    /// Validate a document that has already been parsed.
+    ///
+    /// Separate from [`Self::from_toml`] because a caller that needs more of the
+    /// document than the apps — the user catalog's `removed` list, in particular —
+    /// would otherwise have to parse the same text twice.
+    ///
+    /// # Errors
+    /// The same failures as [`Self::from_toml`], and [`Error::DuplicateAppId`] when two
+    /// entries share an id.
+    pub fn from_document(file: CatalogFile, source: &str) -> Result<Self> {
+        if file.version > SCHEMA_VERSION {
+            return Err(Error::Catalog(format!(
+                "{source} is schema version {} but this launcher understands {SCHEMA_VERSION}",
+                file.version
+            )));
+        }
+
+        let mut entries = Vec::with_capacity(file.apps.len());
+        for app in file.apps {
+            entries.push(resolve(app, source)?);
+        }
+
+        let mut catalog = Self { entries };
+        catalog.sort();
+        catalog.check_unique(source)?;
+        catalog.assign_distinct_colors();
+        Ok(catalog)
+    }
+
+    /// Drop the apps a person has removed.
+    ///
+    /// A merge can only add or replace an entry, and the shipped catalog is compiled
+    /// into the binary, so removal is expressed as a list of ids in the user's document
+    /// rather than as a missing entry. Applied after every layer has been merged, it
+    /// means "removed" wins over both the built-in entry and an override of it — which
+    /// is what a person pressing Remove expects.
+    ///
+    /// Returns how many entries were dropped, so a caller can tell a removal that did
+    /// something from one naming an app that was not there.
+    pub fn apply_removals(&mut self, removed: &[String]) -> usize {
+        let before = self.entries.len();
+        self.entries
+            .retain(|entry| !removed.iter().any(|id| id == &entry.id));
+        before - self.entries.len()
     }
 
     /// Merge an overlay into this catalog; entries with the same `id` are replaced.
@@ -351,26 +397,6 @@ impl Catalog {
     /// The ids, in display order.
     pub fn ids(&self) -> impl Iterator<Item = &str> {
         self.entries.iter().map(|entry| entry.id.as_str())
-    }
-
-    fn from_file(file: CatalogFile, source: &str) -> Result<Self> {
-        if file.version > SCHEMA_VERSION {
-            return Err(Error::Catalog(format!(
-                "{source} is schema version {} but this launcher understands {SCHEMA_VERSION}",
-                file.version
-            )));
-        }
-
-        let mut entries = Vec::with_capacity(file.apps.len());
-        for app in file.apps {
-            entries.push(resolve(app, source)?);
-        }
-
-        let mut catalog = Self { entries };
-        catalog.sort();
-        catalog.check_unique(source)?;
-        catalog.assign_distinct_colors();
-        Ok(catalog)
     }
 
     fn sort(&mut self) {
@@ -618,11 +644,14 @@ mod tests {
     use super::*;
 
     #[test]
-    fn the_shipped_catalog_loads_and_holds_the_four_apps() {
+    fn the_shipped_catalog_loads_and_holds_vncli() {
         let catalog = Catalog::builtin().unwrap();
+        // One app ships on purpose: it is the only vecnode repository whose releases
+        // the launcher would install, and a catalog full of entries that cannot be
+        // installed teaches the wrong thing about what the launcher is for.
         let ids: Vec<&str> = catalog.ids().collect();
-        assert_eq!(ids, ["vncli", "vncode", "vn-finance", "vn-mediabus"]);
-        assert_eq!(catalog.len(), 4);
+        assert_eq!(ids, ["vncli"]);
+        assert_eq!(catalog.len(), 1);
     }
 
     #[test]
@@ -638,9 +667,10 @@ mod tests {
                 "{} does not accept an asset named after itself",
                 entry.id
             );
-            // A launch table is optional — `vncode` is a plugin pack, not a program —
-            // but one that exists must cover both non-macOS platforms, or the app
-            // would silently be unstartable on half the machines that install it.
+            // A launch table is optional — an app that installs into something else
+            // rather than running on its own declares none — but one that exists must
+            // cover both non-macOS platforms, or the app would silently be unstartable
+            // on half the machines that install it.
             if !entry.launch.is_empty() {
                 assert!(
                     !entry.launch.for_os(Os::Windows).is_empty(),
@@ -657,14 +687,25 @@ mod tests {
     }
 
     #[test]
-    fn vncode_is_modelled_as_install_only_because_it_is_not_a_program() {
-        let catalog = Catalog::builtin().unwrap();
-        let vncode = catalog.get("vncode").unwrap();
+    fn an_entry_with_no_launch_table_is_install_only() {
+        // The shape a plugin pack or a library takes: something to install, nothing to
+        // start. `vncode` was the drawn-from-life case; the rule outlives it.
+        let catalog = Catalog::from_toml(
+            r#"
+            [[app]]
+            id = "plugin-pack"
+            name = "Plugin pack"
+            repo = "vecnode/vncode"
+            "#,
+            "test",
+        )
+        .unwrap();
+        let entry = catalog.get("plugin-pack").unwrap();
         assert!(
-            vncode.launch.is_empty(),
-            "vncode installs into DeepSeek Harness; it has no launch command"
+            entry.launch.is_empty(),
+            "an entry with no [app.launch] table must have no launch command"
         );
-        assert_eq!(vncode.kind, AppKind::Release);
+        assert_eq!(entry.kind, AppKind::Release);
     }
 
     #[test]
@@ -690,7 +731,7 @@ mod tests {
     }
 
     #[test]
-    fn the_four_shipped_apps_are_visually_distinguishable() {
+    fn the_shipped_apps_are_visually_distinguishable() {
         let catalog = Catalog::builtin().unwrap();
         let mut colors: Vec<String> = catalog
             .entries()
@@ -738,11 +779,36 @@ mod tests {
         .unwrap();
         catalog.merge(overlay).unwrap();
 
-        assert_eq!(catalog.len(), 4, "an override must not add a fifth app");
+        assert_eq!(catalog.len(), 1, "an override must not add a second app");
         let entry = catalog.get("vncli").unwrap();
         assert_eq!(entry.name, "vncli (mine)");
         assert_eq!(entry.repo.slug(), "someone/fork-of-vncli");
         assert_eq!(entry.color, Color::new(0xff, 0x00, 0x00));
+    }
+
+    #[test]
+    fn an_app_removed_in_the_user_catalog_is_dropped_after_the_merge() {
+        // The removal has to happen *after* every layer is merged, or an override of a
+        // built-in entry would come back at the next start. This is the case that made
+        // the tombstone a fact in the document rather than an absence from it.
+        let mut catalog = Catalog::builtin().unwrap();
+        let overlay = Catalog::from_toml(
+            r#"
+            removed = ["vncli"]
+            "#,
+            "overlay",
+        )
+        .unwrap();
+        catalog.merge(overlay).unwrap();
+        assert_eq!(catalog.apply_removals(&["vncli".to_owned()]), 1);
+        assert!(catalog.is_empty());
+    }
+
+    #[test]
+    fn removing_an_id_that_is_not_there_removes_nothing() {
+        let mut catalog = Catalog::builtin().unwrap();
+        assert_eq!(catalog.apply_removals(&["not-an-app".to_owned()]), 0);
+        assert_eq!(catalog.len(), 1);
     }
 
     #[test]
@@ -760,7 +826,7 @@ mod tests {
         )
         .unwrap();
         catalog.merge(overlay).unwrap();
-        assert_eq!(catalog.len(), 5);
+        assert_eq!(catalog.len(), 2);
         assert_eq!(catalog.get("vecnode-site").unwrap().kind, AppKind::Link);
     }
 

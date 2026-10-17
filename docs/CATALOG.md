@@ -9,8 +9,8 @@ Three layers are merged, each one over the last, entry by entry, by `id`:
 
 | Layer | Path | Purpose |
 |---|---|---|
-| Built-in | `assets/catalog/apps.toml` in this repository | Compiled into the binary with `include_str!`. The four apps that ship. |
-| Yours | See below | Whatever you add or override. Never overwritten by an update. |
+| Built-in | `assets/catalog/apps.toml` in this repository | Compiled into the binary with `include_str!`. The app that ships. |
+| Yours | See below | Whatever you add or override, and whatever you remove. Never overwritten by an update. |
 | *(reserved)* | A manifest in the repository itself | Designed for, not implemented. See "Later" below. |
 
 Where "yours" is, per platform:
@@ -47,14 +47,39 @@ apps down the grid.
 If the file cannot be read, the launcher says so in a notice and carries on with the
 built-in catalog. A broken catalog is never a failure to start.
 
-## The four apps that ship
+## The app that ships
 
 | id | Repository | Colour | Notes |
 |---|---|---|---|
-| `vncli` | `vecnode/vncli` | `#3B82F6` | The only one publishing a release for this platform today. |
-| `vncode` | `vecnode/vncode` | `#8B5CF6` | A DeepSeek Harness plugin pack, not a program: install-only, no launch command. |
-| `vn-finance` | `vecnode/vn-finance` | `#16A34A` | Publishes no releases yet. |
-| `vn-mediabus` | `vecnode/vn-mediabus` | `#F97316` | Publishes no releases yet, and needs a toolchain no launcher should guess at. |
+| `vncli` | `vecnode/vncli` | `#3B82F6` | The reference case for the release convention, and the only vecnode repository whose releases the launcher would install today. |
+
+One app, on purpose. The launcher used to track four, and three of them published
+nothing the launcher could install: `vncode` is a DeepSeek Harness plugin pack, and
+`vn-finance` and `vn-mediabus` have no releases at all. A catalog of entries that can only
+be pointed at is a catalog that teaches the wrong thing about what the launcher is for, so
+they are added from the **Add repository** tab by anyone who wants them instead.
+
+## Removing an app
+
+Removing is the inverse of adding, and it has to work for the apps that ship, which live
+in a file compiled into the binary. A merge can add or replace an entry; it cannot delete
+one. So removal is written as a fact in *your* file rather than as the absence of an entry
+from it:
+
+```toml
+version = 1
+removed = ["vncli"]
+```
+
+`removed` is a list of ids. It is applied **after** every layer has been merged, which is
+what makes it beat both the shipped entry and an override of it — the case that made this
+a tombstone rather than a deletion. Adding the same repository again takes its id back out
+of the list.
+
+Removing also deletes the copy the launcher installed, if it installed one:
+`<data>/apps/<id>/`, and nothing else. An app it merely found — on `PATH`, in a folder you
+named, in a clone — is never touched. The confirmation names the folder before it goes.
+`docs/INSTALL.md` §8 is the full account of what removal may and may not reach.
 
 ## Adding your own
 
