@@ -8,7 +8,9 @@ of scope.
 
 `docs/ARCHITECTURE.md` explains why the code is shaped the way it is.
 `docs/RELEASES.md` is the agreement every repository must keep for the launcher to
-install anything. Both are worth reading before a change of any size.
+install anything, and `docs/INSTALL.md` is the plan for the four operations that act
+on it — download, install, update and remove. All three are worth reading before a
+change of any size.
 
 ## 1. Workspace map
 
@@ -17,7 +19,7 @@ crates/
   core      vnl-core     pure and IO-free: the catalog, release parsing, asset
                          choice, versions, statuses, timestamp arithmetic
   native    vnl-native   desktop only: paths, HTTP, the feed cache, detection,
-                         process launching, the user's catalog file
+                         process launching, removal, the user's catalog file
   ui        vnl-ui       the egui interface: theme, fonts, icons, widgets, views
 apps/
   vn-launcher            the eframe shell: owns the world, runs the worker
@@ -25,7 +27,7 @@ xtask/                   cargo xtask ci | fmt | lint | test | version
 assets/
   catalog/apps.toml      the catalog the launcher ships with
   fonts/                 Inter and JetBrains Mono, under the SIL OFL
-docs/                    ARCHITECTURE, CATALOG, MANIFEST, RELEASES
+docs/                    ARCHITECTURE, CATALOG, INSTALL, MANIFEST, RELEASES
 ```
 
 **Layering is a rule, not a suggestion.**
@@ -69,8 +71,10 @@ disk must produce an error a person can act on — never a panic.
 
 ### Installing other people's software safely
 
-Not implemented yet — see `docs/RELEASES.md` — but the rules that will govern it are
-already reflected in the code:
+Downloading, installing and updating are not implemented yet — the plan is
+`docs/INSTALL.md`, and it waits on `docs/RELEASES.md` — but the rules that will govern
+them are already reflected in the code, and the rules that govern *removal* are already
+enforced by it:
 
 - Verify a download against the release's `SHA256SUMS.txt`, then GitHub's asset
   `digest`, and only then record-and-warn. Never treat a missing checksum as
@@ -79,8 +83,11 @@ already reflected in the code:
   archives; do not execute installers.
 - Never elevate, silently or otherwise.
 - Never delete anything the launcher did not itself create. This is why
-  `InstallState` distinguishes `Found` from `Managed`, and why `detect` never
-  produces `Managed`.
+  `InstallState` distinguishes `Found` from `Managed`, why `detect` never produces
+  `Managed`, and why `vnl_native::uninstall` takes an **id** rather than a path: it
+  can only ever reach a direct child of its own install root, it refuses an id that is
+  not one plain path component, and it refuses a link or a file. Do not loosen any of
+  those three.
 - An interrupted install must leave the previous version working. Version
   directories plus an atomically-flipped `current` pointer is the design; keep it.
 
@@ -129,6 +136,8 @@ a special case in `catalog.rs` for one repository, the manifest is missing a fie
 | The verdict | `core/src/status.rs` | One pure function; the interface never re-derives it. |
 | The feed | `native/src/feed.rs` | Never fails: every problem is an `Availability`. |
 | The cache | `native/src/cache.rs` | The launcher is an anonymous guest of a 60-request-per-hour API. |
+| Deleting an app | `native/src/uninstall.rs` | It takes an id, not a path, and reaches only a direct child of the install root. `a\b` is one component on Linux and two on Windows — the separator check exists because of that. |
+| Removal that survives a restart | `core/src/manifest.rs`, `core/src/catalog.rs` | The shipped catalog is compiled in, so a merge cannot delete an entry: removal is a tombstone applied *after* the merge, or an override of a built-in entry comes back. |
 | Fonts | `ui/src/fonts.rs` | `set_fonts` lands on the *next* pass, so the shell installs fonts before the first frame. Text drawn with an unbound family panics. |
 | Card width | `ui/src/widgets.rs` | A frame's contents must be told the width *minus the padding*. Handing them the full width is what once collapsed the detail page. |
 | TLS | `native/src/http.rs` | With default features off, `RootCerts` must be named explicitly or ureq panics on first use. |

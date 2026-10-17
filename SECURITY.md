@@ -69,6 +69,14 @@ come from a catalog file.
 cache are the only files created or replaced, both under the platform's own config and
 cache locations, and the catalog write goes through a temporary file and a rename.
 
+**Removal can only reach one directory.** `vnl_native::uninstall` takes an **id**, never
+a path: it refuses an id that is not exactly one plain path component (checked against
+both separators on every platform), refuses a target whose parent is not the install
+root, refuses a link, and refuses a file. Anything it did not create is therefore out of
+reach — an app found on `PATH`, in a folder the person named, or in a clone is never
+deleted, and an app that fails those checks is reported rather than removed. The catalog
+tombstone is written *before* the directory, so a failed catalog write deletes nothing.
+
 ## Audit of revision 0.1.0
 
 Performed on the initial commit. Every finding below was fixed in the same revision
@@ -143,8 +151,10 @@ Removed.
   validation described above. Process spawning elsewhere uses `std::process::Command`
   with an argument vector, never a shell string.
 - **Path traversal.** No user-controlled value reaches a path join. Catalog ids are
-  sanitised to `[a-z0-9-]`; URLs are parsed structurally; `{install}` is always the
-  launcher's own directory.
+  restricted to ASCII alphanumerics, `-`, `_` and `.`, and the one deletion that joins an
+  id onto a path re-checks that it is a single plain component on both separator
+  conventions; URLs are parsed structurally; `{install}` is always the launcher's own
+  directory.
 - **Credential handling.** Nothing to handle.
 - **Secret material in the tree.** None.
 
@@ -181,9 +191,15 @@ only launches on an explicit click.
 
 ## What is not implemented, and what that owes
 
-Downloading, verifying, extracting, installing, updating and removing are all absent.
-The requirements below are recorded in `docs/RELEASES.md` §6 and must be met — and
-audited — before any of them ship.
+Downloading, verifying, extracting, installing and updating are all absent. The plan for
+them is `docs/INSTALL.md`; the requirements below are recorded in `docs/RELEASES.md` §6
+and must be met — and audited — before any of them ship.
+
+**Removing has shipped**, and owes less than the others because it has nothing to unpack
+or verify: it writes a tombstone in the user's catalog, then deletes
+`<data>/apps/<id>/` if it exists, under the guards above. It cannot delete an app the
+launcher did not install, because until installing exists it has installed nothing, and
+because the checks above do not depend on that being true.
 
 - **Extraction must reject** any archive entry whose resolved path escapes the
   extraction root: `..` components, absolute paths, and symlinks pointing outside.

@@ -61,7 +61,7 @@ xtask/                   cargo xtask ci | fmt | lint | test | version
 assets/
   catalog/apps.toml      the catalog that ships
   fonts/                 Inter and JetBrains Mono, under the SIL OFL
-docs/                    ARCHITECTURE, CATALOG, MANIFEST, RELEASES
+docs/                    ARCHITECTURE, CATALOG, INSTALL, MANIFEST, RELEASES
 ```
 
 ## Documentation
@@ -71,6 +71,7 @@ docs/                    ARCHITECTURE, CATALOG, MANIFEST, RELEASES
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | Why the crates are split the way they are |
 | [docs/CATALOG.md](docs/CATALOG.md) | Where the catalog lives and how the layers merge |
 | [docs/MANIFEST.md](docs/MANIFEST.md) | Every field an app entry can set |
+| [docs/INSTALL.md](docs/INSTALL.md) | **The plan for downloading, installing, updating and removing an app** |
 | [docs/RELEASES.md](docs/RELEASES.md) | **The release convention every repository must follow** |
 | [SECURITY.md](SECURITY.md) | The threat model, the audit findings, and what is still owed |
 
