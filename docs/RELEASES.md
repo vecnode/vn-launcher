@@ -270,7 +270,10 @@ Mapping the convention onto the code that exists today, so the contract is not a
 
 ## 6. What the launcher will do once this holds
 
-Recorded here so the convention can be judged against the mechanism it enables. None of this is implemented yet, and none of it will be until the repositories agree.
+Recorded here so the convention can be judged against the mechanism it enables. The
+engineering plan behind all of it — the layout on disk, the step order, the failure
+semantics and the milestones — is [`INSTALL.md`](INSTALL.md). Removal has shipped; the
+other three have not, and none of them will be until the repositories agree.
 
 ### Install
 
@@ -292,6 +295,8 @@ Install the newer version beside the old, flip the pointer, then remove version 
 ### Uninstall
 
 Remove the shims and the menu entries, then the version directories, then the record. **Nothing outside `<data>/apps/<id>/` and the shims the launcher created is ever removed** — an app found on `PATH` that the launcher did not install is never deleted, which is why `InstallState` distinguishes `Found` from `Managed` today.
+
+The catalog half of this is already in place: the launcher writes a tombstone in the user's catalog, so an app it ships with can be removed and stays removed. See `INSTALL.md` §8.
 
 ### Never
 

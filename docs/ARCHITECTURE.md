@@ -80,7 +80,8 @@ The only crate that touches the world.
 | `feed` | Reads releases and **never fails** — every problem is an `Availability` |
 | `detect` | Finds an app already on the machine, and never claims to have installed it |
 | `launch` | Starts a process; opens a URL or a directory after validating it |
-| `user_catalog` | Reads and writes the person's own catalog file |
+| `uninstall` | Deletes the launcher's own copy of an app, and refuses every way of reaching anything else |
+| `user_catalog` | Reads and writes the person's own catalog file: additions, overrides and removals |
 
 Two design choices here are worth stating.
 
@@ -146,12 +147,16 @@ including its fonts is a single self-contained binary.
 release unpacks into `apps/<id>/<version>/` and the pointer flips only after
 everything succeeded. An interrupted install therefore leaves the previous version
 running, an update is a pointer flip, and a rollback is another one. There is no
-"repair" state to reason about because there is no half-installed state.
+"repair" state to reason about because there is no half-installed state. The layout,
+and the step order that makes it hold, is `docs/INSTALL.md` §3 and §4. Removal already
+depends on it: `<data>/apps/<id>/` is the only directory the launcher will ever delete.
 
 **`Found` is not `Managed`.** Detection can only ever produce `InstallState::Found`.
 An app the launcher did not install cannot be updated or removed by it, because the
 launcher has no idea how it was built or where its pieces are. Collapsing the two
-would be the single change most likely to delete somebody's work.
+would be the single change most likely to delete somebody's work. `uninstall` therefore
+takes an id, not a path, and it can only ever reach a direct child of its own install
+root.
 
 ## Where a new piece of behaviour goes
 
@@ -160,6 +165,7 @@ would be the single change most likely to delete somebody's work.
 | A rule about releases, versions, assets or statuses | `vnl-core`, with a test |
 | A new field a catalog entry can set | `core/src/manifest.rs`, then `catalog.rs`, then `docs/MANIFEST.md` |
 | An HTTP request or a filesystem operation | `vnl-native` |
+| Something that deletes a file | `vnl-native`, behind the guards in `docs/INSTALL.md` §8, with a test per guard |
 | A new screen or control | `vnl-ui`, driven by `World` and returning `Action` |
 | Wiring between the two | `apps/vn-launcher/src/shell.rs` |
 | A check that CI should run | `xtask/src/main.rs`, then `.github/workflows/ci.yml` |
