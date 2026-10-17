@@ -318,6 +318,64 @@ pub fn icon_button(ui: &mut Ui, theme: &Theme, icon: Icon, tooltip: &str, enable
     }
 }
 
+/// A square icon button that shows whether it is the chosen one.
+///
+/// [`icon_button`] cannot say "this is the current one": a hover and a selection would
+/// look the same. The chosen one therefore gets the rail's own treatment — an accent
+/// tint behind it and accent ink on it — which is how a person already reads the
+/// selected tab in the rail.
+pub fn icon_toggle(
+    ui: &mut Ui,
+    theme: &Theme,
+    icon: Icon,
+    selected: bool,
+    tooltip: &str,
+    enabled: bool,
+) -> Response {
+    let size = 32.0;
+    let sense = if enabled { Sense::click() } else { Sense::hover() };
+    let (rect, response) = ui.allocate_exact_size(vec2(size, size), sense);
+
+    if ui.is_rect_visible(rect) {
+        let palette = &theme.palette;
+        let fill = if selected {
+            crate::theme::Palette::tint(palette.accent, if theme.dark { 46 } else { 30 })
+        } else if enabled && response.is_pointer_button_down_on() {
+            palette.bg_active
+        } else if enabled && response.hovered() {
+            palette.bg_hover
+        } else {
+            Color32::TRANSPARENT
+        };
+        if fill != Color32::TRANSPARENT {
+            ui.painter()
+                .rect_filled(rect, CornerRadius::same(RADIUS_MD), fill);
+        }
+
+        let colour = if selected {
+            palette.accent
+        } else if !enabled {
+            palette.text_tertiary
+        } else if response.hovered() {
+            palette.text_primary
+        } else {
+            palette.text_secondary
+        };
+        icons::paint(ui.painter(), icon, rect.shrink(8.0), colour, 1.6);
+    }
+
+    let response = if enabled {
+        response.on_hover_cursor(egui::CursorIcon::PointingHand)
+    } else {
+        response
+    };
+    if tooltip.is_empty() {
+        response
+    } else {
+        response.on_hover_text(tooltip)
+    }
+}
+
 /// A small upper-case label above a group.
 pub fn overline(ui: &mut Ui, theme: &Theme, text: &str) {
     ui.label(

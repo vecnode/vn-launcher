@@ -252,8 +252,11 @@ fn about(ui: &mut egui::Ui, theme: &Theme, world: &World, actions: &mut Vec<Acti
         ui.add_space(SPACE_SM);
         ui.label(
             RichText::new(
-                "Downloading, installing, updating and removing apps. Those four arrive together \
-                 once every repository publishes releases the same way — see docs/RELEASES.md.",
+                "Downloading, installing and updating apps. The three arrive together once \
+                 every repository publishes releases the same way — docs/INSTALL.md is the \
+                 plan, docs/RELEASES.md is the agreement it waits on. Removing an app works \
+                 today: it takes the repository out of the launcher and deletes what the \
+                 launcher itself installed, and nothing else.",
             )
             .font(theme.text.small.clone())
             .color(theme.palette.text_secondary),

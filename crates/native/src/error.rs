@@ -52,6 +52,9 @@ pub enum Error {
     },
     /// No usable platform directory was reported by the operating system.
     NoConfigDir,
+    /// The launcher declined to do something, because doing it would have touched
+    /// something it does not own.
+    Refused(String),
 }
 
 impl fmt::Display for Error {
@@ -75,6 +78,7 @@ impl fmt::Display for Error {
             Self::NoConfigDir => {
                 f.write_str("the operating system did not report a configuration directory for this user")
             }
+            Self::Refused(reason) => f.write_str(reason),
         }
     }
 }

@@ -222,6 +222,44 @@ impl World {
     }
 }
 
+/// How the library lays its apps out.
+///
+/// Two views rather than one because they answer different questions. The grid is for
+/// recognising an app — a tile, a colour, a name. The list is for *reading* the library:
+/// one app per row, same columns in the same place, so status and version can be
+/// compared down the page instead of hunted for across it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
+pub enum LibraryView {
+    /// One card per app, in as many columns as fit.
+    #[default]
+    Grid,
+    /// One row per app.
+    List,
+}
+
+impl LibraryView {
+    /// Both views, in the order the toggle offers them.
+    pub const ALL: [Self; 2] = [Self::Grid, Self::List];
+
+    /// How it is named in a tooltip and in the settings file.
+    #[must_use]
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Grid => "Grid",
+            Self::List => "List",
+        }
+    }
+
+    /// The mark that stands for it.
+    #[must_use]
+    pub fn icon(self) -> Icon {
+        match self {
+            Self::Grid => Icon::Grid,
+            Self::List => Icon::Rows,
+        }
+    }
+}
+
 /// A destination in the navigation rail.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Tab {
@@ -279,6 +317,8 @@ pub enum Action {
     SetSearch(String),
     /// Change the theme.
     SetTheme(ThemeChoice),
+    /// Draw the library as a grid of cards or as a list of rows.
+    SetLibraryView(LibraryView),
     /// Include or exclude pre-releases.
     SetPrerelease(bool),
     /// Ask whether the launcher itself has a newer release.
@@ -314,6 +354,11 @@ pub enum Action {
         /// Where the app already lives on this machine; empty when none was named.
         local: String,
     },
+    /// Take an app out of the launcher, and delete what the launcher itself installed.
+    ///
+    /// Answered by a confirmation first, because there is no undo for the files; the
+    /// entry can be added back, the deleted copy cannot.
+    RemoveApp(String),
     /// Dismiss one notice.
     DismissNotice(usize),
     /// Dismiss every notice.
@@ -324,19 +369,17 @@ pub enum Action {
 
 /// Why an action cannot be carried out yet, if it cannot.
 ///
-/// Installation and removal are deliberately absent from this milestone: the
-/// release conventions have to be settled first, and the interface says so rather
-/// than offering a button that would fail. See `docs/RELEASES.md`.
+/// Downloading, installing and updating are deliberately absent from this milestone:
+/// they arrive together, once the release conventions hold, and the interface says so
+/// rather than offering a button that would fail. See `docs/INSTALL.md` for the plan and
+/// `docs/RELEASES.md` for the agreement it waits on. Removing an app does not wait for
+/// them — there is nothing installed for it to delete yet — so it has no entry here.
 #[must_use]
 pub fn deferred_reason(action: &str) -> &'static str {
     match action {
         "install" | "update" => {
-            "Installing and updating arrive once every repository publishes releases the \
-             same way. See docs/RELEASES.md for the convention being adopted."
-        }
-        "uninstall" => {
-            "Removal arrives with installation, so that the launcher never removes \
-             something it cannot put back."
+            "Installing and updating arrive together, once every repository publishes \
+             releases the same way. See docs/INSTALL.md for the plan."
         }
         _ => "This is not available yet.",
     }

@@ -11,7 +11,7 @@
 use egui::{Color32, CornerRadius, Margin, Rect, RichText, Sense, pos2, vec2};
 
 use crate::icons::{self, Icon};
-use crate::model::{Action, ProbeReport, Tab, World};
+use crate::model::{Action, LibraryView, ProbeReport, Tab, World};
 use crate::theme::{
     Palette, RADIUS_MD, SIDEBAR_WIDTH, SPACE_LG, SPACE_MD, SPACE_SM, SPACE_XL, SPACE_XS, TOPBAR_HEIGHT,
     Theme, ThemeChoice,
@@ -28,6 +28,10 @@ pub struct Ui {
     pub search: String,
     /// The app whose detail page is open.
     pub selected: Option<String>,
+    /// How the library is laid out.
+    pub view: LibraryView,
+    /// The app whose removal is being confirmed.
+    pub confirm_remove: Option<String>,
     /// The theme the person chose.
     pub theme_choice: ThemeChoice,
     /// Whether pre-releases are offered.
@@ -51,11 +55,13 @@ pub struct Ui {
 impl Ui {
     /// A fresh interface.
     #[must_use]
-    pub fn new(theme_choice: ThemeChoice, prerelease: bool) -> Self {
+    pub fn new(theme_choice: ThemeChoice, prerelease: bool, view: LibraryView) -> Self {
         Self {
             tab: Tab::Library,
             search: String::new(),
             selected: None,
+            view,
+            confirm_remove: None,
             theme_choice,
             prerelease,
             add_input: String::new(),
@@ -96,7 +102,7 @@ impl Ui {
                     .fill(theme.palette.bg_base)
                     .inner_margin(Margin::symmetric(SPACE_XL as i8, 0)),
             )
-            .show(root, |ui| self.top_bar(ui, &theme, world));
+            .show(root, |ui| self.top_bar(ui, &theme, world, &mut actions));
 
         egui::CentralPanel::default()
             .frame(
@@ -123,6 +129,9 @@ impl Ui {
         }
         if self.confirm_check {
             self.confirm_window(&ctx, &theme, world, &mut actions);
+        }
+        if self.confirm_remove.is_some() {
+            self.remove_window(&ctx, &theme, world, &mut actions);
         }
 
         actions
@@ -290,7 +299,7 @@ impl Ui {
     }
 
     /// The bar above the content.
-    fn top_bar(&mut self, ui: &mut egui::Ui, theme: &Theme, world: &World) {
+    fn top_bar(&mut self, ui: &mut egui::Ui, theme: &Theme, world: &World, actions: &mut Vec<Action>) {
         ui.horizontal_centered(|ui| {
             let title = match (&self.tab, &self.selected) {
                 (Tab::Library, Some(id)) => world
@@ -333,6 +342,23 @@ impl Ui {
                         .font(theme.text.body.clone())
                         .margin(Margin::symmetric(SPACE_SM as i8, 6));
                     ui.add(search);
+                }
+
+                // The layout applies to the library itself, so it is offered beside the
+                // library and not on the detail page, where a card or a row is not what is
+                // on screen. Right-to-left, so this lands between the search field and the
+                // check button.
+                if self.tab == Tab::Library && self.selected.is_none() {
+                    ui.add_space(SPACE_SM);
+                    for view in LibraryView::ALL.into_iter().rev() {
+                        let selected = self.view == view;
+                        let response =
+                            widgets::icon_toggle(ui, theme, view.icon(), selected, view.label(), true);
+                        if response.clicked() && !selected {
+                            self.view = view;
+                            actions.push(Action::SetLibraryView(view));
+                        }
+                    }
                 }
             });
         });
@@ -528,6 +554,111 @@ impl Ui {
         // without this the window would close for one frame and return the next.
         if !open {
             self.confirm_check = false;
+        }
+    }
+
+    /// Ask before taking an app out of the launcher.
+    ///
+    /// The dialog states both halves of what removal is — the entry, and the files —
+    /// because they have different consequences. The entry can be added back from the
+    /// Add repository tab; the deleted copy cannot, so it is named before it goes.
+    fn remove_window(
+        &mut self,
+        ctx: &egui::Context,
+        theme: &Theme,
+        world: &World,
+        actions: &mut Vec<Action>,
+    ) {
+        let Some(id) = self.confirm_remove.clone() else {
+            return;
+        };
+        let Some(card) = world.app(&id) else {
+            // The app is already gone — the card was removed by something else between
+            // the click and this frame. A dialog about nothing is worse than none.
+            self.confirm_remove = None;
+            return;
+        };
+
+        let name = card.entry.name.clone();
+        let install_dir = format!("{}/{id}", world.install_root);
+        let found = matches!(card.status, vnl_core::AppStatus::Found { .. });
+
+        let mut open = true;
+        let frame = egui::Frame::new()
+            .fill(theme.palette.bg_elevated)
+            .stroke(egui::Stroke::new(1.0, theme.palette.border_subtle))
+            .corner_radius(CornerRadius::same(crate::theme::RADIUS_LG))
+            .inner_margin(Margin::same(SPACE_XL as i8));
+
+        egui::Window::new(format!("Remove {name}?"))
+            .open(&mut open)
+            .collapsible(false)
+            .resizable(false)
+            .anchor(egui::Align2::CENTER_CENTER, vec2(0.0, 0.0))
+            .frame(frame)
+            .show(ctx, |ui| {
+                ui.set_max_width(440.0);
+                ui.label(
+                    RichText::new(format!(
+                        "The launcher will stop tracking {name}, and will not check \
+                         {} again.",
+                        card.entry.repo.slug()
+                    ))
+                    .font(theme.text.body.clone())
+                    .color(theme.palette.text_primary),
+                );
+
+                ui.add_space(SPACE_MD);
+                widgets::field(ui, theme, "Files it would delete", &install_dir, true);
+                ui.add_space(SPACE_XS);
+                ui.label(
+                    RichText::new(if found {
+                        format!(
+                            "{name} is on this machine, but the launcher did not install it, \
+                             so nothing outside the folder above is touched — and that folder \
+                             is not where it was found."
+                        )
+                    } else {
+                        "Only what the launcher put in that folder. An app found on PATH, in a \
+                         folder you named, or in a clone is never deleted — the launcher did \
+                         not put it there."
+                            .to_owned()
+                    })
+                    .font(theme.text.small.clone())
+                    .color(theme.palette.text_secondary),
+                );
+
+                ui.add_space(SPACE_LG);
+                ui.columns(2, |columns| {
+                    let remove = widgets::button_full(
+                        &mut columns[0],
+                        theme,
+                        ButtonKind::Danger,
+                        Some(Icon::Trash),
+                        "Remove it",
+                        true,
+                    );
+                    if remove.clicked() {
+                        actions.push(Action::RemoveApp(id.clone()));
+                        self.confirm_remove = None;
+                    }
+
+                    let keep = widgets::button_full(
+                        &mut columns[1],
+                        theme,
+                        ButtonKind::Secondary,
+                        Some(Icon::Close),
+                        "Keep it",
+                        true,
+                    );
+                    if keep.clicked() {
+                        self.confirm_remove = None;
+                    }
+                });
+            });
+
+        if !open {
+            self.confirm_remove = None;
         }
     }
 }

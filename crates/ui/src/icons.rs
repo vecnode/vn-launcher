@@ -41,6 +41,10 @@ pub enum Icon {
     Trash,
     /// A plus: add.
     Plus,
+    /// Four squares: a grid of cards.
+    Grid,
+    /// Three stacked bars: a list of rows.
+    Rows,
     /// A right-pointing triangle: start.
     Play,
     /// The launcher's own mark: a girdled crystal.
@@ -197,6 +201,22 @@ pub fn paint(painter: &Painter, icon: Icon, rect: Rect, color: Color32, width: f
         Icon::Plus => {
             canvas.line((12.0, 4.6), (12.0, 19.4), stroke);
             canvas.line((4.6, 12.0), (19.4, 12.0), stroke);
+        }
+        Icon::Grid => {
+            // Four squares with a gutter, rather than one square with a cross through it:
+            // the gap is what makes it read as separate tiles at sixteen pixels.
+            for (x, y) in [(3.6, 3.6), (13.2, 3.6), (3.6, 13.2), (13.2, 13.2)] {
+                canvas.path(
+                    &[(x, y), (x + 7.2, y), (x + 7.2, y + 7.2), (x, y + 7.2)],
+                    stroke,
+                    true,
+                );
+            }
+        }
+        Icon::Rows => {
+            canvas.line((3.6, 6.4), (20.4, 6.4), stroke);
+            canvas.line((3.6, 12.0), (20.4, 12.0), stroke);
+            canvas.line((3.6, 17.6), (20.4, 17.6), stroke);
         }
         Icon::Play => {
             canvas.painter.add(Shape::convex_polygon(

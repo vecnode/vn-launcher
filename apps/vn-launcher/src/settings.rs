@@ -5,13 +5,16 @@
 //! derived fact is a copy that can be wrong.
 
 use serde::{Deserialize, Serialize};
-use vnl_ui::ThemeChoice;
+use vnl_ui::{LibraryView, ThemeChoice};
 
 /// The few choices worth persisting.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Settings {
     /// The chosen theme.
     pub theme: ThemeChoice,
+    /// Whether the library is drawn as a grid of cards or a list of rows.
+    #[serde(default)]
+    pub library_view: LibraryView,
     /// How many hours a cached release feed stays fresh.
     pub interval_hours: u32,
     /// Whether pre-releases are offered.
@@ -24,6 +27,10 @@ impl Default for Settings {
     fn default() -> Self {
         Self {
             theme: ThemeChoice::System,
+            // The grid is the first thing a person sees, and the one that shows what an
+            // app *is* — a colour, a mark, a name. The list is a choice they make once
+            // they know what they are looking for.
+            library_view: LibraryView::Grid,
             // Six hours, four apps: sixteen requests a day against an anonymous
             // allowance of sixty an hour. Comfortable, and the cache means a window
             // reopened ten times in an afternoon costs nothing.

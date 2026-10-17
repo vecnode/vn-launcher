@@ -10,7 +10,7 @@ use eframe::Storage;
 use vnl_core::catalog::{AppEntry, Catalog};
 use vnl_core::status::{self, AppStatus, Availability, InstallState};
 use vnl_core::{Os, Repo, Target};
-use vnl_native::{Paths, launch, user_catalog};
+use vnl_native::{Paths, launch, uninstall, user_catalog};
 use vnl_ui::{Action, AppCard, LauncherUpdate, Notice, Tab, Tone, World};
 
 use crate::settings::Settings;
@@ -79,7 +79,7 @@ impl Shell {
         worker.send(Request::Check(checkable_entries(&catalog)));
         world.busy = true;
 
-        let ui = vnl_ui::Ui::new(settings.theme, settings.prerelease);
+        let ui = vnl_ui::Ui::new(settings.theme, settings.prerelease, settings.library_view);
 
         Self {
             ui,
@@ -194,6 +194,7 @@ impl Shell {
                 self.ui.theme_choice = choice;
                 self.settings.theme = choice;
             }
+            Action::SetLibraryView(view) => self.ui.view = view,
             Action::SetPrerelease(value) => {
                 self.ui.prerelease = value;
                 self.settings.prerelease = value;
@@ -234,6 +235,7 @@ impl Shell {
                 self.worker.send(Request::Probe(text));
             }
             Action::AddRepository { repo, local } => self.add_repository(&repo, &local),
+            Action::RemoveApp(id) => self.remove_app(&id),
             Action::ResetProbe => {
                 self.ui.probe = None;
                 self.ui.probing = false;
@@ -377,6 +379,55 @@ impl Shell {
         }
     }
 
+    /// Take an app out of the launcher, and delete the copy the launcher installed.
+    ///
+    /// Two writes with very different consequences, so they are done in that order and
+    /// reported separately. The catalog is written first: if that fails, nothing on disk
+    /// has been touched and the app is exactly as it was. The install folder cannot come
+    /// back, so a person is told which folder it was rather than merely that it is done.
+    fn remove_app(&mut self, id: &str) {
+        let Some(card) = self.world.app(id).cloned() else {
+            return;
+        };
+        let name = card.entry.name.clone();
+        let path = self.paths.user_catalog();
+
+        if let Err(error) = user_catalog::remove(&path, id) {
+            self.notice(Notice::error(
+                format!("Could not remove {name}"),
+                format!("{error}. Nothing was deleted."),
+            ));
+            return;
+        }
+
+        let removal = uninstall::remove_installed(&self.paths, id);
+        self.reload_catalog();
+        self.ui.selected = None;
+        self.ui.tab = Tab::Library;
+
+        match removal {
+            Ok(uninstall::Removal::Deleted(folder)) => {
+                self.notice(Notice::success(format!("Removed {name}")).with_detail(format!(
+                    "Its install folder, {}, was deleted. Anything installed anywhere else was \
+                     left alone.",
+                    folder.display()
+                )));
+            }
+            Ok(uninstall::Removal::NothingThere) => {
+                self.notice(Notice::success(format!("Removed {name}")).with_detail(
+                    "The launcher had installed nothing for it, so no files were touched.".to_owned(),
+                ));
+            }
+            Err(error) => {
+                self.notice(Notice::success(format!("{name} is no longer tracked")));
+                self.notice(Notice::error(
+                    "Its install folder could not be deleted",
+                    format!("{error}. Everything outside the launcher's own install folder was left alone."),
+                ));
+            }
+        }
+    }
+
     /// Re-read the catalog and rebuild the app list, keeping what is already known.
     fn reload_catalog(&mut self) {
         let mut problems = Vec::new();
@@ -407,6 +458,7 @@ impl Shell {
     fn sync_settings(&mut self) {
         self.settings.theme = self.ui.theme_choice;
         self.settings.prerelease = self.ui.prerelease;
+        self.settings.library_view = self.ui.view;
     }
 }
 
@@ -454,12 +506,15 @@ fn load_catalog(paths: &Paths, problems: &mut Vec<Notice>) -> Catalog {
     let path = paths.user_catalog();
     match user_catalog::load(&path) {
         Ok(Some(overlay)) => {
-            if let Err(error) = catalog.merge(overlay) {
+            if let Err(error) = catalog.merge(overlay.catalog) {
                 problems.push(Notice::error(
                     "Your catalog could not be merged",
                     error.to_string(),
                 ));
             }
+            // Applied after the merge, and even when the merge failed: an app a person
+            // removed stays removed whatever else is wrong with the file.
+            catalog.apply_removals(&overlay.removed);
         }
         Ok(None) => {}
         Err(error) => problems.push(Notice::error(

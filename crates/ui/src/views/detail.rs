@@ -41,7 +41,7 @@ pub fn show(ui: &mut egui::Ui, theme: &Theme, world: &World, state: &mut State, 
     ui.add_space(SPACE_LG);
     header(ui, theme, card);
     ui.add_space(SPACE_LG);
-    action_row(ui, theme, card, actions);
+    action_row(ui, theme, card, state, actions);
     ui.add_space(SPACE_XL);
 
     status_card(ui, theme, card);
@@ -89,7 +89,13 @@ fn header(ui: &mut egui::Ui, theme: &Theme, card: &AppCard) {
 }
 
 /// Everything that can be done with this app.
-fn action_row(ui: &mut egui::Ui, theme: &Theme, card: &AppCard, actions: &mut Vec<Action>) {
+fn action_row(
+    ui: &mut egui::Ui,
+    theme: &Theme,
+    card: &AppCard,
+    state: &mut State,
+    actions: &mut Vec<Action>,
+) {
     ui.horizontal(|ui| {
         views::primary_button(ui, theme, card, actions);
 
@@ -127,6 +133,16 @@ fn action_row(ui: &mut egui::Ui, theme: &Theme, card: &AppCard, actions: &mut Ve
         {
             actions.push(Action::OpenInstallRoot);
         }
+
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            // Separated from the rest on purpose: this is the only action on the page that
+            // destroys anything, and it sits where a hand is least likely to arrive by
+            // accident — behind a confirmation either way.
+            let remove = widgets::button(ui, theme, ButtonKind::Danger, Some(Icon::Trash), "Remove", true);
+            if remove.clicked() {
+                state.confirm_remove = Some(card.id().to_owned());
+            }
+        });
     });
 }
 
@@ -357,8 +373,9 @@ fn pending_card(ui: &mut egui::Ui, theme: &Theme, card: &AppCard, actions: &mut 
         ui.label(
             RichText::new(
                 "The launcher can already read every repository's releases and work out which \
-                 file belongs on this machine. Installing is held back until each repository \
-                 publishes releases the same way, so that the same three steps work everywhere.",
+                 file belongs on this machine. Downloading, unpacking and recording the result \
+                 arrive together — the plan is written down, and it waits on each repository \
+                 publishing releases the same way.",
             )
             .font(theme.text.small.clone())
             .color(theme.palette.text_secondary),
@@ -370,12 +387,12 @@ fn pending_card(ui: &mut egui::Ui, theme: &Theme, card: &AppCard, actions: &mut 
                 theme,
                 ButtonKind::Secondary,
                 Some(Icon::External),
-                "Read the release convention",
+                "Read the install plan",
                 true,
             )
             .clicked()
             {
-                actions.push(Action::OpenUrl(crate::RELEASE_CONVENTION_URL.to_owned()));
+                actions.push(Action::OpenUrl(crate::INSTALL_PLAN_URL.to_owned()));
             }
             if widgets::button(
                 ui,

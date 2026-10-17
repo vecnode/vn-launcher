@@ -12,14 +12,18 @@ use crate::widgets;
 /// Draw the updates surface.
 pub fn show(ui: &mut egui::Ui, theme: &Theme, world: &World, state: &mut State, actions: &mut Vec<Action>) {
     if world.apps.is_empty() {
-        widgets::empty_state(
+        if widgets::empty_state(
             ui,
             theme,
             Icon::Package,
             "No apps are configured",
             "The catalog is empty. Add a repository to get started.",
             Some(("Add a repository", Icon::Plus)),
-        );
+        )
+        .is_some()
+        {
+            actions.push(Action::SetTab(crate::model::Tab::Discover));
+        }
         return;
     }
 
@@ -70,8 +74,9 @@ pub fn show(ui: &mut egui::Ui, theme: &Theme, world: &World, state: &mut State, 
     ui.add_space(SPACE_MD);
     ui.label(
         RichText::new(
-            "Updating is not switched on yet: it waits on every repository publishing releases \
-             the same way, so that one set of rules is correct everywhere.",
+            "Updating is not switched on yet: it arrives with downloading and installing, once \
+             every repository publishes releases the same way. Removing an app is available \
+             from its detail page.",
         )
         .font(theme.text.small.clone())
         .color(theme.palette.text_tertiary),
