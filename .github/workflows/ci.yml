@@ -16,35 +16,75 @@ permissions:
 
 env:
   CARGO_TERM_COLOR: always
+  # A warning is a failure in the test build as well as under clippy. That is what lets
+  # the three-platform job below skip clippy without going blind to a warning that one
+  # platform sees and another does not.
+  RUSTFLAGS: -D warnings
+  # Incremental artefacts are worthless on a runner, and they make the cached target
+  # directory several times larger to save and restore.
+  CARGO_INCREMENTAL: "0"
 
 concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
-  check:
-    name: check (${{ matrix.os }})
+  # Twenty seconds, on its own, so a stray blank line fails before three builds start.
+  formatting:
+    name: formatting
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+
+      - run: cargo fmt --all -- --check
+
+  # The same logic on three operating systems, and deliberately without the window:
+  # `vnl-core` is pure and `vnl-native` is where the per-platform code lives, so this is
+  # the job that catches a `#[cfg]` mistake — while egui, wgpu and naga, which are most
+  # of the compile time and none of the platform difference, stay out of it.
+  logic:
+    name: logic (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
-
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: logic
+
+      - run: cargo test -p vnl-core -p vnl-native --profile ci
+
+  # Everything at once, once. The window is built here, clippy runs over every target
+  # (which no other job does, because it doubles the compile), and the documentation is
+  # built with warnings denied.
+  desktop:
+    name: desktop (linux)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
 
       - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: desktop
 
       # eframe's winit and wgpu backends link against the system windowing and GL
       # libraries on Linux. The comparable Windows and macOS libraries ship with the
-      # runner images, so only Linux needs anything installed.
+      # runner images, so only this job needs anything installed.
       - name: Linux build dependencies
-        if: runner.os == 'Linux'
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
@@ -61,16 +101,13 @@ jobs:
 
       # Exactly what `cargo xtask ci` runs, so a developer and CI can never disagree
       # about what "passing" means.
-      - name: Formatting
-        run: cargo fmt --all -- --check
-
       - name: Lints
-        run: cargo clippy --workspace --all-targets --all-features -- -D warnings
+        run: cargo clippy --workspace --all-targets --all-features --profile ci -- -D warnings
 
       - name: Tests
-        run: cargo test --workspace --all-features
+        run: cargo test --workspace --all-features --profile ci
 
       - name: Documentation
-        run: cargo doc --workspace --no-deps --all-features
+        run: cargo doc --workspace --no-deps --all-features --profile ci
         env:
           RUSTDOCFLAGS: -D warnings

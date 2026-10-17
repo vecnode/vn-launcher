@@ -66,6 +66,23 @@ opt-level = 2
 [profile.dev]
 opt-level = 1
 
+# CI compiles the same code without the development concessions. Optimising every
+# dependency is what makes the launcher feel right to run and what makes a check take
+# minutes: egui, wgpu and naga are most of the tree, and CI compiles them twice (clippy,
+# then the test harness) on each of three runners. This profile compiles them
+# unoptimised, keeps line tables so a failing test still says where, and drops
+# incremental artefacts — worthless on a runner, and they make the cached target folder
+# several times larger.
+[profile.ci]
+inherits = "dev"
+opt-level = 0
+debug = "line-tables-only"
+incremental = false
+
+[profile.ci.package."*"]
+opt-level = 0
+debug = "line-tables-only"
+
 [profile.release]
 lto = "thin"
 codegen-units = 1

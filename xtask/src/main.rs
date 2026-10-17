@@ -19,13 +19,22 @@ fn main() -> ExitCode {
             "--workspace",
             "--all-targets",
             "--all-features",
+            "--profile",
+            CI_PROFILE,
             "--",
             "-D",
             "warnings",
         ]),
-        "test" => cargo(&["test", "--workspace", "--all-features"]),
-        "check" => cargo(&["check", "--workspace", "--all-targets", "--all-features"]),
-        "doc" => cargo(&["doc", "--workspace", "--no-deps"]),
+        "test" => cargo(&["test", "--workspace", "--all-features", "--profile", CI_PROFILE]),
+        "check" => cargo(&[
+            "check",
+            "--workspace",
+            "--all-targets",
+            "--all-features",
+            "--profile",
+            CI_PROFILE,
+        ]),
+        "doc" => cargo(&["doc", "--workspace", "--no-deps", "--profile", CI_PROFILE]),
         "version" => {
             println!("{}", env!("CARGO_PKG_VERSION"));
             ExitCode::SUCCESS
@@ -42,6 +51,14 @@ fn main() -> ExitCode {
     }
 }
 
+/// The profile the checks run in.
+///
+/// `dev` optimises every dependency, which is right for the launcher and wrong for a
+/// check: the same code takes several times longer to compile. `ci` in `Cargo.toml` is
+/// that profile without the optimisations, so `cargo xtask ci` and the workflow still
+/// run exactly the same checks on exactly the same code.
+const CI_PROFILE: &str = "ci";
+
 /// Everything CI runs, in the order that fails fastest.
 fn ci() -> ExitCode {
     for step in [
@@ -51,11 +68,13 @@ fn ci() -> ExitCode {
             "--workspace",
             "--all-targets",
             "--all-features",
+            "--profile",
+            CI_PROFILE,
             "--",
             "-D",
             "warnings",
         ][..],
-        &["test", "--workspace", "--all-features"][..],
+        &["test", "--workspace", "--all-features", "--profile", CI_PROFILE][..],
     ] {
         let outcome = cargo(step);
         if outcome != ExitCode::SUCCESS {

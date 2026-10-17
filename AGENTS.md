@@ -111,6 +111,12 @@ cargo xtask test      # tests alone
 cargo run --release   # the launcher
 ```
 
+The checks run in the **`ci` profile** (`Cargo.toml`), which is `dev` without the
+dependency optimisations — the same code, compiled several times faster. `cargo run`
+still uses `dev`, which is the profile that optimises dependencies because a debug
+build of egui feels broken to use. Do not "fix" that difference by optimising the `ci`
+profile: it is what keeps a check under a minute.
+
 Tests that use the network are ignored by default. Run them deliberately after
 touching the HTTP layer or asset matching:
 
